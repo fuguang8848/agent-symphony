@@ -428,7 +428,7 @@ class ThinkingSkill:
         self._context.set("user_answers", {})
         
         intro = (
-            "🎵 **你好，我是指挥。**\n\n"
+            "* 你好，我是指挥。\n\n"
             "请告诉我你想要完成的事情吧。"
         )
         
@@ -504,7 +504,7 @@ class ThinkingSkill:
         if not questions:
             return "请告诉我更多细节吧。"
         
-        intro = "🎵 **让我确认一下：**\n\n"
+        intro = "* 让我确认一下：\n\n"
         
         q_list = []
         for i, q in enumerate(questions[:5], 1):
@@ -588,13 +588,13 @@ class ThinkingSkill:
             {"task": "制定计划", "description": requirement}
         ])
         
-        plan_text = f"📋 **根据你的需求，我帮你梳理了这样的路径：**\n\n"
+        plan_text = f"* 根据你的需求，我帮你梳理了这样的路径：\n\n"
         
         # 简单计划（后续可以调用 team 的详细规划）
         steps = [
-            f"📝 **需求**：{requirement}",
-            f"📊 **明确度**：{self._context.get('clarity_score', 0):.0%}",
-            "\n🎯 **建议的下一步**：",
+            f"* 需求：{requirement}",
+            f"* 明确度：{self._context.get('clarity_score', 0):.0%}",
+            "\n* 建议的下一步：",
             "1. 明确具体目标和范围",
             "2. 收集必要信息和资料",
             "3. 分解任务，逐步执行"
@@ -650,7 +650,7 @@ class ThinkingSkill:
         if any(w in msg_lower for w in ["好", "行", "可以", "开始", "执行", "对", "没错"]):
             self._context.set("symphony_phase", "executing")
             return {
-                "response": "🎵 **明白，开始协调各方成员！**\n\n我将调用 memory 记录你的需求，search 搜索相关信息，team 执行具体任务。\n\n稍等，正在启动...",
+                "response": "* 明白，开始协调各方成员！\n\n我将调用 memory 记录你的需求，search 搜索相关信息，team 执行具体任务。\n\n稍等，正在启动...",
                 "state": "executing",
                 "done": False,
                 "skill_requests": [
@@ -676,7 +676,7 @@ class ThinkingSkill:
         处理执行中的进度询问或新指令
         """
         return {
-            "response": "🎵 **执行中**\n\n我在持续协调各方。有新进展会告诉你。\n\n你有什么要补充的吗？",
+            "response": "* 执行中\n\n我在持续协调各方。有新进展会告诉你。\n\n你有什么要补充的吗？",
             "state": "executing",
             "done": False
         }
@@ -693,7 +693,7 @@ class ThinkingSkill:
             return self._clarify_requirement(message)
         
         return {
-            "response": "✅ 有什么需要再找我。交响乐随时待命！🎵",
+            "response": "* 有什么需要再找我。交响乐随时待命！",
             "state": "completed",
             "done": True
         }
