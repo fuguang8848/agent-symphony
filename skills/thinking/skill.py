@@ -412,6 +412,29 @@ class ThinkingSkill:
         # 处理用户回答
         if user_answers:
             self._process_user_answers(user_answers)
+            # 重新评估需求（回答可能已补充足够信息）
+            updated_req = self._context.get("requirement", "")
+            result = self._understand_requirement({"requirement": updated_req})
+            if result.get("can_proceed"):
+                self._context.set("symphony_phase", "planning")
+                self._context.set("clarity_score", result.get("clarity_score", 0.7))
+                return self._generate_plan()
+            # 仍需澄清，返回追问
+            questions = result.get("questions", [])
+            if questions:
+                return {
+                    "response": self._format_questions_for_user(questions),
+                    "questions": questions,
+                    "state": "clarifying",
+                    "done": False,
+                    "skill_requests": []
+                }
+            # 没有问题但还不能执行，继续等待
+            return {
+                "response": "还有什么需要我了解的吗？",
+                "state": "clarifying",
+                "done": False
+            }
         elif message:
             # 新消息 -> 理解需求或继续对话
             return self._handle_user_message(message)
@@ -610,6 +633,59 @@ class ThinkingSkill:
             "skill_requests": []
         }
 
+    def _generate_learning_path(self) -> dict:
+        """
+        为完全新手生成量化交易学习路径（LLM驱动）
+        """
+        requirement = self._context.get("requirement", "")
+        user_answers = self._context.get("user_answers", {})
+        
+        # 构造 prompt，让 LLM 生成个性化学习路径
+        prompt = f"""你是量化交易教育专家。用户是一个完全新手，想要学习量化交易。
+
+用户背景：
+{requirement}
+
+详细背景：
+"""
+        for key, value in user_answers.items():
+            prompt += f"- {key}: {value}\n"
+        prompt += """
+
+请为这个用户生成一条从零基础到能实战的量化交易学习路径。要求：
+1. 分阶段（3个阶段左右）
+2. 每个阶段有具体行动项
+3. 推荐免费/低成本的资源
+4. 强调实操重要性
+5. 最后给出选项让用户选择下一步
+
+格式要求：
+- 用 **标题** 标记重点
+- 用 1️⃣ 2️⃣ 3️⃣ 标记选项
+- 总量控制在500字以内
+- 语气像一位耐心的导师在带新人
+"""
+        
+        try:
+            llm_response = self._context.call_llm(prompt)
+            if "[LLM not available" in llm_response:
+                # LLM 不可用，返回引导性回复
+                return {
+                    "response": "* 好，你是新手，我来带你走这条路。\n\n作为你的指挥家，我需要先了解你更多背景，才能给出最合适的路线规划。请告诉我：\n\n1. 你每周能投入多少时间学习？\n2. 你是更偏向动手实践，还是先想搞清楚原理？\n3. 有没有任何编程或金融相关的基础？",
+                    "state": "planning",
+                    "done": False,
+                    "skill_requests": []
+                }
+        except Exception as e:
+            llm_response = f"*[指挥家暂时无法思考，请稍后再试]*"
+        
+        return {
+            "response": f"* 好，你是新手，我来带你走这条路。\n\n{llm_response}",
+            "state": "planning",
+            "done": False,
+            "skill_requests": []
+        }
+
     def _decide_next_step(self) -> dict:
         """
         根据当前状态决定下一步
@@ -647,7 +723,22 @@ class ThinkingSkill:
         """
         msg_lower = message.lower()
         
-        if any(w in msg_lower for w in ["好", "行", "可以", "开始", "执行", "对", "没错"]):
+        # 优先检查：用户表示迷茫 -> 直接给学习路径
+        if any(w in msg_lower for w in ["不知道", "迷茫", "不会", "不懂", "怎么开始", "你指导", "你决定", "你安排", "带我", "教我"]):
+            return self._generate_learning_path()
+        
+        # 检查：用户想跳过学习直接开始
+        if any(w in msg_lower for w in ["不学习", "不学", "跳过学习", "不用学", "直接开始", "直接用", "不入门"]):
+            return self._handle_skip_learning()
+        
+        if any(w in msg_lower for w in ["不对", "调整", "改", "不是"]):
+            return {
+                "response": "好的，请告诉我你想怎么调整？",
+                "state": "planning",
+                "done": False
+            }
+        
+        if any(w in msg_lower for w in ["好", "行", "执行", "对", "没错"]):
             self._context.set("symphony_phase", "executing")
             return {
                 "response": "* 明白，开始协调各方成员！\n\n我将调用 memory 记录你的需求，search 搜索相关信息，team 执行具体任务。\n\n稍等，正在启动...",
@@ -658,18 +749,60 @@ class ThinkingSkill:
                     {"skill": "search", "action": "search", "params": {"query": self._context.get("requirement", "")}}
                 ]
             }
-        elif any(w in msg_lower for w in ["不对", "调整", "改", "不是"]):
-            return {
-                "response": "好的，请告诉我你想怎么调整？",
-                "state": "planning",
-                "done": False
-            }
-        else:
-            return {
-                "response": "请告诉我：可以开始执行吗？或者需要调整？",
-                "state": "planning",
-                "done": False
-            }
+        
+        return {
+            "response": "请告诉我：可以开始执行吗？或者需要调整？",
+            "state": "planning",
+            "done": False
+        }
+
+    def _handle_skip_learning(self) -> dict:
+        """
+        处理用户想跳过学习直接开始的情况（LLM驱动）
+        """
+        requirement = self._context.get("requirement", "")
+        user_answers = self._context.get("user_answers", {})
+        
+        # 构造 prompt
+        prompt = f"""用户背景：
+{requirement}
+"""
+        for key, value in user_answers.items():
+            prompt += f"- {key}: {value}\n"
+        prompt += """
+
+用户说想用机器学习做量化交易，但不想学习基础知识。作为量化交易专家，你需要：
+1. 诚实告诉他为什么至少需要理解基本概念（不能完全零基础）
+2. 但理解他时间有限，给他一个「最低限度」的学习方案
+3. 给出3条路线让他选择
+4. 语气要务实、理解，但也要说实话
+
+格式：
+- 先说为什么不能完全零基础
+- 再给最低限度方案（2-3天速成）
+- 给出路线选择 1️⃣ 2️⃣ 3️⃣
+- 总量400字以内
+"""
+        
+        try:
+            llm_response = self._context.call_llm(prompt)
+            if "[LLM not available" in llm_response:
+                # LLM 不可用，返回引导性回复
+                return {
+                    "response": "* 你的想法我理解。\n\n说实话，至少要懂一些基本概念才能做量化交易——不然就像蒙着眼睛开车。\n\n不过我理解你时间有限。请告诉我：\n\n1. 你每周能投入多少时间？\n2. 你更倾向于哪种学习方式？\n   - 先系统学习（2-4周）\n   - 速成+工具（1-2周）\n   - 用现成平台（几天）",
+                    "state": "planning",
+                    "done": False,
+                    "skill_requests": []
+                }
+        except Exception as e:
+            llm_response = f"*[指挥家暂时无法思考，请稍后再试]*"
+        
+        return {
+            "response": f"* 你的想法我理解。{llm_response}",
+            "state": "planning",
+            "done": False,
+            "skill_requests": []
+        }
 
     def _handle_execution_progress(self, message: str) -> dict:
         """
