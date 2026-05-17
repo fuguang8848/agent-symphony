@@ -31,11 +31,7 @@ class LLMProvider:
             "default_model": "gpt-4o-mini",
             "embed_model": "text-embedding-3-small"
         },
-        "bailian": {
-            "env_keys": ["DASHSCOPE_API_KEY", "OPENAI_BASE_URL"],
-            "default_model": "qwen-plus",
-            "embed_model": "text-embedding-v2"
-        },
+
         "minimax": {
             "env_keys": ["MINIMAX_API_KEY", "MINIMAX_BASE_URL"],
             "default_model": "MiniMax-M2.7",
