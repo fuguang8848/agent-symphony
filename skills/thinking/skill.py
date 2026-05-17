@@ -32,7 +32,7 @@ if str(SUPER_THINKING_PATH) not in sys.path:
     sys.path.insert(0, str(SUPER_THINKING_PATH))
 
 try:
-    from super_thinking.core.registry import Registry as SuperRegistry
+    from super_thinking.core.extended_registry import ExtendedRegistry as SuperRegistry
     from super_thinking.core.jury import Jury, JuryResult
     from super_thinking.core.router import Router
     from super_thinking.perspectives._interface import PerspectiveOutput
@@ -509,32 +509,54 @@ class ThinkingSkill:
             perspective ID 列表
         """
         # 各阶段对应的专家团配置
+        # 阶段配置：Python专家 + SKILL.md专家
         PHASE_PERSPECTIVES = {
             "clarifying": [
+                # Python 专家
                 "stakeholder",       # 利益相关者 - 理解各方诉求
                 "meta_thinking",     # 元认知 - 发现思维盲点
                 "risk_detail",       # 风险视角 - 识别隐患
                 "magi_debate",       # 辩论 - 权衡利弊
                 "doubt",             # 怀疑 - 费曼检验
-                "past_experience",    # 过往经验 - 避免重复犯错
+                "past_experience",   # 过往经验 - 避免重复犯错
+                # SKILL.md 专家
+                "bayesian-perspective",        # 贝叶斯 - 概率更新/信念修正
+                "gametheory-perspective",      # 博弈论 - 博弈结构诊断
+                "criticalthinking-perspective", # 批判性思维 - 逻辑陷阱识别
             ],
             "planning": [
+                # Python 专家
                 "stakeholder",       # 利益相关者 - 确认目标
                 "jobs",             # 乔布斯 - 产品思维
                 "naval",            # Naval - 决策方法论
                 "risk_detail",       # 风险视角 - 评估风险
                 "vcp",              # VCP - 节奏把控
                 "magi_debate",       # 辩论 - 方案权衡
+                # SKILL.md 专家
+                "bayesian-perspective",        # 贝叶斯 - 概率评估
+                "designthinking-perspective",   # 设计思维 - 用户中心设计
+                "systems-perspective",         # 系统思维 - 整体优化
+                "complexity-perspective",      # 复杂性 - 非线性思维
+                "network-perspective",         # 网络效应 - 规模化思维
             ],
             "executing": [
+                # Python 专家
                 "verification",      # 验证 - 检查结果
                 "stakeholder",      # 利益相关者 - 确认满意度
                 "meta_thinking",    # 元认知 - 反思执行
                 "risk_detail",      # 风险视角 - 监控风险
+                # SKILL.md 专家
+                "information-perspective",     # 信息论 - 噪声过滤
+                "statistical-perspective",    # 统计 - 效果验证
+                "network-perspective",         # 网络 - 传播分析
             ],
             "completed": [
+                # Python 专家
                 "meta_thinking",    # 元认知 - 总结经验
                 "verification",     # 验证 - 确认结果
+                # SKILL.md 专家
+                "bayesian-perspective",        # 贝叶斯 - 事后复盘
+                "complexity-perspective",      # 复杂性 - 模式识别
             ],
         }
         
@@ -615,7 +637,7 @@ class ThinkingSkill:
             
             # 生成综合响应
             if summary_parts:
-                response_text = f"* 我请了 {len(result.outputs)} 位专家来帮你分析：\n\n" + "\n\n".join(summary_parts[:6])
+                response_text = f"* 我请了 {len(result.outputs)} 位专家来帮你分析：\n\n" + "\n\n".join(summary_parts)
                 if questions:
                     response_text += "\n\n**还需要澄清：**\n"
                     for q in questions[:3]:
