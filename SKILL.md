@@ -81,6 +81,65 @@ result = thinking.execute("understand", {
 - MINIMAX_API_KEY
 - DEEPSEEK_API_KEY
 
+## 交互模式（指挥家对话）
+
+通过 `dialog` 动作启动交互式对话：
+
+```bash
+python agent_symphony_cli.py -i
+```
+
+或通过 execute 调用：
+
+```python
+thinking = ThinkingSkill()
+result = thinking.execute("dialog", {
+    "message": "你好",
+    "answers": {},
+    "skill_results": {}
+})
+# result["response"] - 面向用户的回复
+# result["skill_requests"] - 需要执行的技能申请
+# result["state"] - clarifying|planning|executing|completed
+# result["done"] - 是否完成
+```
+
+### 对话流程
+
+```
+用户启动交响乐
+    ↓
+指挥家自我介绍
+    ↓
+用户说出需求
+    ↓
+如果需求不明确 → 提问澄清
+    ↓
+如果明确 → 制定计划
+    ↓
+用户确认计划
+    ↓
+执行（调用 memory/search/team）
+    ↓
+完成/继续
+```
+
+### 技能申请（skill_requests）
+
+当 thinking 需要调用其他技能时，返回 `skill_requests`：
+
+```python
+{
+    "response": "正在搜索...",
+    "skill_requests": [
+        {"skill": "memory", "action": "store", "params": {...}},
+        {"skill": "search", "action": "search", "params": {...}}
+    ]
+}
+```
+
+OpenClaw 执行这些技能后，通过 `notify("skill.result", {...})` 回调结果。
+
 ---
 
 _技能交响乐 · Agent Symphony_
