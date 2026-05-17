@@ -497,9 +497,59 @@ class ThinkingSkill:
         
         return self._clarify_requirement(message)
 
+    def _select_perspectives_for(self, phase: str, requirement: str) -> list[str]:
+        """
+        thinking 技能作为指挥家，主动选择需要调用的专家团/方法论
+        
+        Args:
+            phase: 当前阶段 (clarifying | planning | executing)
+            requirement: 用户需求
+        
+        Returns:
+            perspective ID 列表
+        """
+        # 各阶段对应的专家团配置
+        PHASE_PERSPECTIVES = {
+            "clarifying": [
+                "stakeholder",       # 利益相关者 - 理解各方诉求
+                "meta_thinking",     # 元认知 - 发现思维盲点
+                "risk_detail",       # 风险视角 - 识别隐患
+                "magi_debate",       # 辩论 - 权衡利弊
+                "doubt",             # 怀疑 - 费曼检验
+                "past_experience",    # 过往经验 - 避免重复犯错
+            ],
+            "planning": [
+                "stakeholder",       # 利益相关者 - 确认目标
+                "jobs",             # 乔布斯 - 产品思维
+                "naval",            # Naval - 决策方法论
+                "risk_detail",       # 风险视角 - 评估风险
+                "vcp",              # VCP - 节奏把控
+                "magi_debate",       # 辩论 - 方案权衡
+            ],
+            "executing": [
+                "verification",      # 验证 - 检查结果
+                "stakeholder",      # 利益相关者 - 确认满意度
+                "meta_thinking",    # 元认知 - 反思执行
+                "risk_detail",      # 风险视角 - 监控风险
+            ],
+            "completed": [
+                "meta_thinking",    # 元认知 - 总结经验
+                "verification",     # 验证 - 确认结果
+            ],
+        }
+        
+        selected = PHASE_PERSPECTIVES.get(phase, PHASE_PERSPECTIVES["clarifying"])
+        
+        # 检查这些 perspective 是否在 registry 中可用
+        available = [p.id for p in self._super_registry.list_all()] if self._super_registry else []
+        if available:
+            selected = [p for p in selected if p in available]
+        
+        return selected
+    
     def _analyze_with_jury(self, requirement: str) -> dict:
         """
-        使用 Agent-Superthinking Jury 进行多专家分析
+        使用 Agent-Superthinking Jury 进行多专家分析（thinking 指挥，主动选专家）
         
         Returns:
             dict with keys: clarity_score, can_proceed, needs, jury_result, response
@@ -516,14 +566,19 @@ class ThinkingSkill:
             }
         
         try:
-            # 使用 Jury 进行多专家分析
+            # thinking 作为指挥家，主动选择需要调用的专家
+            phase = self._context.get("symphony_phase", "clarifying")
+            selected_perspectives = self._select_perspectives_for(phase, requirement)
+            
+            # 使用 selective 模式，只调用选中的专家
             result = self._jury.think(
                 input=requirement,
                 context={
                     "user_answers": self._context.get("user_answers", {}),
-                    "phase": "clarifying"
+                    "phase": phase
                 },
-                mode="auto"
+                mode="selective",
+                selective_ids=selected_perspectives
             )
             
             # 汇总各专家观点
@@ -534,8 +589,7 @@ class ThinkingSkill:
                 # 使用 analysis 或 summary 作为专家意见
                 analysis_text = getattr(output, 'analysis', None) or getattr(output, 'summary', None) or ''
                 if analysis_text:
-                    # 截取前200字作为摘要
-                    summary_text = analysis_text[:200] if len(analysis_text) > 200 else analysis_text
+                    summary_text = analysis_text[:300] if len(analysis_text) > 300 else analysis_text
                     summary_parts.append(f"**[{pid}]**: {summary_text}")
                 # key_points 也加入
                 key_points = getattr(output, 'key_points', None) or []
@@ -544,11 +598,10 @@ class ThinkingSkill:
                         summary_parts.append(f"  → {kp[:100]}")
             
             # 判断是否可以继续
-            # 只有当 Jury 真正生成了专家意见时才能跳过澄清
             has_expert_opinions = len(summary_parts) > 0
-            can_proceed = has_expert_opinions and (len(questions) == 0 or result.successful >= 3)
-            clarity_score = result.successful / max(result.total_perspectives, 1)
-            needs = questions[:3]
+            can_proceed = has_expert_opinions and result.successful >= 2
+            clarity_score = result.successful / max(len(selected_perspectives), 1)
+            needs = questions[:3] if questions else []
             
             # 如果 Jury 没有产生任何专家意见，降级到规则判断
             if not has_expert_opinions:
@@ -562,7 +615,7 @@ class ThinkingSkill:
             
             # 生成综合响应
             if summary_parts:
-                response_text = "* 我请了几位专家来帮你分析需求：\n\n" + "\n\n".join(summary_parts[:5])
+                response_text = f"* 我请了 {len(result.outputs)} 位专家来帮你分析：\n\n" + "\n\n".join(summary_parts[:6])
                 if questions:
                     response_text += "\n\n**还需要澄清：**\n"
                     for q in questions[:3]:
@@ -606,8 +659,8 @@ class ThinkingSkill:
             self._context.set("symphony_phase", "planning")
             self._context.set("clarity_score", clarity)
             
-            # 生成计划
-            return self._generate_plan()
+            # 生成计划（带上专家分析结果）
+            return self._generate_plan(jury_result)
         else:
             # 需要澄清，返回 Jury 生成的响应或默认问题
             needs = jury_result.get("needs", [])
@@ -733,7 +786,7 @@ class ThinkingSkill:
                 pieces.append(f"{key}: {value}")
         return "; ".join(pieces)
 
-    def _generate_plan(self) -> dict:
+    def _generate_plan(self, jury_result: dict = None) -> dict:
         """
         生成计划
         """
@@ -743,6 +796,13 @@ class ThinkingSkill:
         team_result = self._delegate_to_team([
             {"task": "制定计划", "description": requirement}
         ])
+        
+        # 包含专家分析（如果有）
+        expert_analysis = ""
+        if jury_result:
+            expert_response = jury_result.get("response", "")
+            if expert_response:
+                expert_analysis = expert_response + "\n\n"
         
         plan_text = f"* 根据你的需求，我帮你梳理了这样的路径：\n\n"
         
@@ -757,6 +817,7 @@ class ThinkingSkill:
         ]
         
         plan_text += "\n".join(steps)
+        plan_text = expert_analysis + plan_text
         plan_text += "\n\n这个方向对吗？我们可以继续细化。"
         
         return {
