@@ -428,10 +428,8 @@ class ThinkingSkill:
         self._context.set("user_answers", {})
         
         intro = (
-            "🎵 **你好，我是交响乐大家庭的指挥家。**\n\n"
-            "我负责协调thinking（思考）、memory（记忆）、search（搜索）、team（执行）"
-            "这四位成员，帮你把事情办好。\n\n"
-            "现在，请告诉我你想要完成的事情吧。"
+            "🎵 **你好，我是指挥。**\n\n"
+            "请告诉我你想要完成的事情吧。"
         )
         
         return {
