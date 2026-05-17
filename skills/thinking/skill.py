@@ -139,6 +139,17 @@ class ThinkingSkill:
         self._clarity_score: float = 0.0
         self._call_source: str = "user"  # "user" | "skill" | "system"
         self._linked_skills: dict[str, Any] = {}  # 已链接的技能实例
+        
+        # === Agent-Superthinking Jury 初始化 ===
+        if SUPERTHINKING_AVAILABLE:
+            self._super_registry = SuperRegistry()
+            self._super_registry.discover()
+            self._router = Router(self._super_registry)
+            self._jury = Jury(registry=self._super_registry, router=self._router)
+        else:
+            self._super_registry = None
+            self._router = None
+            self._jury = None
 
     # ==================== 技能链接 ====================
     
@@ -486,12 +497,134 @@ class ThinkingSkill:
         
         return self._clarify_requirement(message)
 
+    def _analyze_with_jury(self, requirement: str) -> dict:
+        """
+        使用 Agent-Superthinking Jury 进行多专家分析
+        
+        Returns:
+            dict with keys: clarity_score, can_proceed, needs, jury_result, response
+        """
+        if not self._jury:
+            # Fallback to rule-based if Jury not available
+            clarity, can_proceed, needs = self._evaluate_clarity_internal(requirement)
+            return {
+                "clarity_score": clarity,
+                "can_proceed": can_proceed,
+                "needs": needs,
+                "jury_result": None,
+                "response": None
+            }
+        
+        try:
+            # 使用 Jury 进行多专家分析
+            result = self._jury.think(
+                input=requirement,
+                context={
+                    "user_answers": self._context.get("user_answers", {}),
+                    "phase": "clarifying"
+                },
+                mode="auto"
+            )
+            
+            # 汇总各专家观点
+            summary_parts = []
+            questions = []
+            
+            for pid, output in result.outputs.items():
+                # 使用 analysis 或 summary 作为专家意见
+                analysis_text = getattr(output, 'analysis', None) or getattr(output, 'summary', None) or ''
+                if analysis_text:
+                    # 截取前200字作为摘要
+                    summary_text = analysis_text[:200] if len(analysis_text) > 200 else analysis_text
+                    summary_parts.append(f"**[{pid}]**: {summary_text}")
+                # key_points 也加入
+                key_points = getattr(output, 'key_points', None) or []
+                if key_points:
+                    for kp in key_points[:2]:
+                        summary_parts.append(f"  → {kp[:100]}")
+            
+            # 判断是否可以继续
+            # 只有当 Jury 真正生成了专家意见时才能跳过澄清
+            has_expert_opinions = len(summary_parts) > 0
+            can_proceed = has_expert_opinions and (len(questions) == 0 or result.successful >= 3)
+            clarity_score = result.successful / max(result.total_perspectives, 1)
+            needs = questions[:3]
+            
+            # 如果 Jury 没有产生任何专家意见，降级到规则判断
+            if not has_expert_opinions:
+                clarity, rule_proceed, rule_needs = self._evaluate_clarity_internal(requirement)
+                clarity_score = clarity
+                if rule_proceed:
+                    can_proceed = True
+                else:
+                    can_proceed = False
+                    needs = rule_needs if rule_needs else ['需求描述太短，请详细说明']
+            
+            # 生成综合响应
+            if summary_parts:
+                response_text = "* 我请了几位专家来帮你分析需求：\n\n" + "\n\n".join(summary_parts[:5])
+                if questions:
+                    response_text += "\n\n**还需要澄清：**\n"
+                    for q in questions[:3]:
+                        response_text += f"\n- {q}"
+            else:
+                response_text = None
+            
+            return {
+                "clarity_score": clarity_score,
+                "can_proceed": can_proceed,
+                "needs": needs if needs else questions[:3],
+                "jury_result": result,
+                "response": response_text
+            }
+            
+        except Exception as e:
+            logging.warning(f"[Thinking] Jury analysis failed: {e}")
+            clarity, can_proceed, needs = self._evaluate_clarity_internal(requirement)
+            return {
+                "clarity_score": clarity,
+                "can_proceed": can_proceed,
+                "needs": needs,
+                "jury_result": None,
+                "response": None
+            }
+
     def _clarify_requirement(self, message: str) -> dict:
         """
         澄清需求阶段
         """
-        # 理解需求
-        result = self._understand_requirement({"requirement": message})
+        # 使用 Jury 进行 AI 分析
+        jury_result = self._analyze_with_jury(message)
+        clarity = jury_result.get("clarity_score", 0)
+        can_proceed = jury_result.get("can_proceed", False)
+        
+        # 存储需求到记忆
+        self._store_requirement(message)
+        
+        if can_proceed:
+            # 需求足够清晰，进入计划阶段
+            self._context.set("symphony_phase", "planning")
+            self._context.set("clarity_score", clarity)
+            
+            # 生成计划
+            return self._generate_plan()
+        else:
+            # 需要澄清，返回 Jury 生成的响应或默认问题
+            needs = jury_result.get("needs", [])
+            response = jury_result.get("response")
+            
+            if not response:
+                response = "* 让我确认一下：\n\n"
+                for need in needs:
+                    response += f"- {need}\n"
+            
+            return {
+                "response": response,
+                "questions": [{"question": q} for q in needs],
+                "state": "clarifying",
+                "done": False,
+                "skill_requests": []
+            }
         clarity = result.get("clarity_score", 0)
         can_proceed = result.get("can_proceed", False)
         

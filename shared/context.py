@@ -16,6 +16,19 @@ from datetime import datetime
 
 # ==================== LLM Provider ====================
 
+def _load_openclaw_config() -> dict | None:
+    """从 OpenClaw 配置文件中读取 LLM 配置"""
+    import json
+    config_path = os.path.expanduser("~/.openclaw/openclaw.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
 class LLMProvider:
     """
     插入式 LLM 提供者
@@ -24,14 +37,13 @@ class LLMProvider:
     skill 不硬编码 API Key，从这里获取
     """
     
-    # 支持的提供商
+    # 支持的提供商（按优先级排序）
     PROVIDERS = {
         "openai": {
             "env_keys": ["OPENAI_API_KEY", "OPENAI_BASE_URL"],
             "default_model": "gpt-4o-mini",
             "embed_model": "text-embedding-3-small"
         },
-
         "minimax": {
             "env_keys": ["MINIMAX_API_KEY", "MINIMAX_BASE_URL"],
             "default_model": "MiniMax-M2.7",
@@ -50,12 +62,22 @@ class LLMProvider:
     }
     
     def __init__(self, provider: str | None = None):
+        self._openclaw_config = _load_openclaw_config()
         self._provider = provider or self._detect_provider()
         self._client = None
+        self._anthropic_client = None
         self._embedding_client = None
     
     def _detect_provider(self) -> str:
-        """自动检测提供商"""
+        """自动检测提供商（优先使用有配额的）"""
+        # 先检查 OpenClaw 配置
+        if self._openclaw_config:
+            models_cfg = self._openclaw_config.get("models", {})
+            providers = models_cfg.get("providers", {})
+            # 按优先级检测：minimax > deepseek > openai
+            for p in ["minimax", "deepseek", "openai"]:
+                if p in providers:
+                    return p
         # 检查环境变量
         for provider, config in self.PROVIDERS.items():
             for env_key in config["env_keys"]:
@@ -74,6 +96,13 @@ class LLMProvider:
         for env_key in config["env_keys"]:
             if key := os.environ.get(env_key):
                 return key
+        # 从 OpenClaw 配置中获取
+        if self._openclaw_config:
+            models = self._openclaw_config.get("models", {})
+            providers = models.get("providers", {})
+            provider_config = providers.get(self._provider, {})
+            if api_key := provider_config.get("apiKey"):
+                return api_key
         # 尝试通用的
         return os.environ.get("OPENAI_API_KEY", os.environ.get("API_KEY", ""))
     
@@ -84,12 +113,27 @@ class LLMProvider:
         for env_key in config["env_keys"]:
             if key := os.environ.get(env_key.replace("_KEY", "_BASE_URL")):
                 return key
+        # 从 OpenClaw 配置中获取
+        if self._openclaw_config:
+            models = self._openclaw_config.get("models", {})
+            providers = models.get("providers", {})
+            provider_config = providers.get(self._provider, {})
+            if base_url := provider_config.get("baseUrl"):
+                return base_url
         # 默认 OpenAI
         return os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     
     @property
     def model(self) -> str:
         """获取默认模型"""
+        # 从 OpenClaw 配置中获取
+        if self._openclaw_config:
+            models = self._openclaw_config.get("models", {})
+            providers = models.get("providers", {})
+            provider_config = providers.get(self._provider, {})
+            if model_list := provider_config.get("models"):
+                if model_list:
+                    return model_list[0].get("id", "qwen3.6-plus")
         config = self._get_provider_config()
         return os.environ.get("LLM_MODEL", config["default_model"])
     
@@ -103,37 +147,73 @@ class LLMProvider:
         """
         调用 LLM 完成文本
         
-        Args:
-            prompt: 用户提示
-            system: 系统提示
-            **kwargs: 其他参数 (temperature, max_tokens 等)
-        
-        Returns:
-            LLM 生成的文本
+        自动检测 provider 并使用对应的 API 格式：
+        - minimax / anthropic兼容 -> Anthropic Messages API
+        - 其他 (openai/deepseek) -> OpenAI Chat Completions API
         """
-        # 延迟导入避免循环
-        try:
-            from openai import OpenAI
-        except ImportError:
-            return "[LLM not available - openai not installed]"
+        # 检查 OpenClaw 配置中的 api 类型
+        api_type = "openai"
+        if self._openclaw_config:
+            providers = self._openclaw_config.get("models", {}).get("providers", {})
+            provider_cfg = providers.get(self._provider, {})
+            api_type = provider_cfg.get("api", "openai-completions")
         
-        if self._client is None:
-            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-        
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        
-        try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                **kwargs
-            )
-            return response.choices[0].message.content or ""
-        except Exception as e:
-            return f"[LLM Error: {str(e)}]"
+        if "anthropic" in api_type:
+            # 使用 Anthropic Messages API (minimax 等)
+            try:
+                from anthropic import Anthropic
+            except ImportError:
+                return "[LLM not available - anthropic not installed]"
+            
+            if not hasattr(self, '_anthropic_client') or self._anthropic_client is None:
+                self._anthropic_client = Anthropic(api_key=self.api_key, base_url=self.base_url)
+            
+            try:
+                response = self._anthropic_client.messages.create(
+                    model=self.model,
+                    max_tokens=kwargs.get("max_tokens", 1024),
+                    system=system,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                # 支持多种 content block 类型
+                if response.content:
+                    for block in response.content:
+                        # TextBlock: 有 type='text' 和 text 属性
+                        if hasattr(block, 'type') and block.type == 'text':
+                            return block.text
+                        # ThinkingBlock: 有 type='thinking' 和 reasoning 属性，跳过
+                        if hasattr(block, 'type') and block.type == 'thinking':
+                            continue
+                        # 兜底：如果有 text 属性
+                        if hasattr(block, 'text') and block.text:
+                            return block.text
+                return ""
+            except Exception as e:
+                return f"[LLM Error: {str(e)}]"
+        else:
+            # 使用 OpenAI Chat Completions API
+            try:
+                from openai import OpenAI
+            except ImportError:
+                return "[LLM not available - openai not installed]"
+            
+            if self._client is None:
+                self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    **kwargs
+                )
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                return f"[LLM Error: {str(e)}]"
     
     def embed(self, texts: str | list[str]) -> list[float] | list[list[float]]:
         """
