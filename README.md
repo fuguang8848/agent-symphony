@@ -2,48 +2,108 @@
 
 > 多技能底层互通，1+1 > 2 的质变效果
 
-[English](README.md) · [简体中文](README_CN.md)
+[English](README_en.md) · 简体中文
 
 ---
 
-## 核心概念
+## 概述
 
-Agent Symphony（技能交响乐）是一个底层互通的 Agent 技能家族。
+Agent Symphony（技能交响乐）是一个多技能互通的 Agent 框架。
 
-**不是简单的工具集合，而是一个有机整体。**
+**核心思想**：4 个技能（thinking/memory/search/team）底层互通，像交响乐团一样各司其职又协调一致。
 
 ```
 用户: "帮我分析这个项目的问题"
-
+    ↓
 thinking (协调者)
-    ↓ 理解需求，向用户提问
-    ↓ 调用 memory 查询上下文
-    ↓ 调用 search 搜索信息
-    ↓ 调用 team 执行任务
-    ↓ 反思结果，与用户讨论
+    ├──→ memory.store()    # 存储上下文
+    ├──→ search.query()    # 搜索信息
+    └──→ team.execute()    # 执行任务
 ```
-
----
-
-## 与传统框架的区别
-
-| 传统 Agent | 技能交响乐 |
-|------------|------------|
-| 技能独立，孤岛效应 | 技能底层互通 |
-| 需要手动协调 | thinking 自动协调 |
-| 每次都要提供全部上下文 | 记忆技能自动管理上下文 |
-| 搜索结果直接返回 | 搜索结果自动过滤、存储、学习 |
 
 ---
 
 ## 四大核心技能
 
-| 技能 | 角色 | 说明 |
-|------|------|------|
-| **thinking** | 协调者 | 理解需求、提问、分析、规划、反思 |
-| **memory** | 记忆中心 | 存储、检索、学习、遗忘 |
-| **search** | 信息获取 | 搜索、爬虫、过滤、排序 |
-| **team** | 执行者 | 任务执行、完成度检查 |
+| 技能 | 仓库 | 角色 | 核心功能 |
+|------|------|------|----------|
+| **thinking** | [AgentSymphony](https://github.com/YintaTriss/AgentSymphony) | 协调者 | 理解需求、提问、规划、反思 |
+| **memory** | [MemorySkill](https://github.com/YintaTriss/MemorySkill) | 记忆中心 | 向量检索、混合搜索、智能遗忘 |
+| **search** | [SearchSkill](https://github.com/YintaTriss/SearchSkill) | 信息获取 | 多引擎搜索、结果路由 |
+| **team** | [AgentTeam](https://github.com/YintaTriss/AgentTeam) | 执行者 | 任务执行、完成度检查 |
+
+---
+
+## 架构图
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Agent Symphony                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────┐                                            │
+│  │   thinking  │ ◄── 协调者（Conductor）                     │
+│  └──────┬──────┘                                            │
+│         │                                                   │
+│    ┌────┴────┬────────────┐                                 │
+│    ▼         ▼            ▼                                 │
+│ ┌──────┐ ┌──────┐    ┌──────┐                                │
+│ │memory│ │search│    │team  │                                │
+│ └──┬───┘ └──┬───┘    └──┬───┘                                │
+│    │        │           │                                   │
+│    ▼        ▼           ▼                                   │
+│ ┌──────────────────────────────┐                            │
+│ │        Shared Context        │  ←── 共享上下文            │
+│ │   • LLM Provider（插入式）    │                            │
+│ │   • Caller 追踪               │                            │
+│ │   • 结果路由                  │                            │
+│ └──────────────────────────────┘                            │
+│                                                             │
+│ ┌──────────────────────────────┐                            │
+│ │       Skill Registry         │  ←── 技能注册表           │
+│ └──────────────────────────────┘                            │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 三大特性
+
+### 1. 插入式 LLM
+
+技能不硬编码 API Key，自动从环境变量读取用户配置：
+
+```python
+# 环境变量自动检测优先级
+# OPENAI_API_KEY → DASHSCOPE_API_KEY → MINIMAX_API_KEY → DEEPSEEK_API_KEY
+
+# skill 通过 SharedContext 获取 LLM
+context = get_context()
+result = context.call_llm("用户的问题是...")
+embeddings = context.get_embeddings("文本")
+```
+
+**不管装在哪里，用的是什么大模型，都能自动适应。**
+
+### 2. 结果路由
+
+search 结果根据调用者决定输出方向：
+
+| 调用者 | 输出方向 | 格式 |
+|--------|----------|------|
+| 用户直接调用 | → 用户 | 完整格式，含 meta |
+| thinking 调用 | → thinking | 结构化数据 |
+| team 调用 | → team | 简化数据 |
+
+### 3. 技能全连通
+
+```
+thinking ←→ memory
+thinking ←→ search
+thinking ←→ team
+team ←→ search
+```
 
 ---
 
@@ -55,8 +115,8 @@ thinking (协调者)
 ┌─────────────────────────────────────┐
 │  阶段一：思考（Thinking）             │
 │  - 向用户提问，澄清需求              │
-│  - 动用 search 获取信息              │
-│  - 动用 memory 记录偏好              │
+│  - 调用 search 获取信息              │
+│  - 调用 memory 记录偏好              │
 └─────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────┐
@@ -81,30 +141,37 @@ thinking (协调者)
 
 ---
 
-## 技能联动示意
+## 目录结构
 
 ```
-thinking (协调者)
-    │
-    ├──→ memory.store()    # 存储偏好/上下文
-    │       ↓
-    │       智能学习用户偏好
-    │
-    ├──→ memory.query()    # 查询记忆
-    │       ↓
-    │       按需召回，不是一次性倒出
-    │
-    ├──→ search.query()    # 搜索信息
-    │       ↓
-    │       多引擎 + 过滤 + 排序
-    │       ↓
-    │       结果自动存入 memory
-    │
-    └──→ team.execute()   # 执行任务
-            ↓
-            完成后自动检查完成度
-            ↓
-            通知 thinking 进行反思
+agent-symphony/
+├── MANIFEST.md          # 技能清单
+├── PROTOCOL.md          # 技能互通协议
+├── README.md            # 本文件
+├── README_en.md         # English version
+├── SKILL.md             # OpenClaw 技能入口
+│
+├── shared/              # 共享模块
+│   ├── __init__.py      # 导出接口
+│   ├── context.py       # 共享上下文（LLM插入式、调用者追踪）
+│   └── registry.py      # 技能注册中心
+│
+├── skills/              # 核心技能
+│   ├── thinking/        # 思考技能
+│   │   ├── skill.py     # 协调者实现
+│   │   └── SKILL.md     # OpenClaw 入口
+│   ├── memory/          # 记忆技能
+│   │   ├── skill.py     # 向量检索实现
+│   │   └── SKILL.md     # OpenClaw 入口
+│   ├── search/          # 搜索技能
+│   │   ├── skill.py     # 多引擎搜索实现
+│   │   └── SKILL.md     # OpenClaw 入口
+│   └── team/            # 团队技能
+│       ├── skill.py     # 任务执行实现
+│       └── SKILL.md     # OpenClaw 入口
+│
+└── tests/               # 测试
+    └── test_integration.py  # 集成测试
 ```
 
 ---
@@ -114,76 +181,70 @@ thinking (协调者)
 ### 1. 安装
 
 ```bash
-# 克隆仓库
-git clone https://github.com/YintaTriss/Agent-Symphony.git
-
-# 进入目录
-cd Agent-Symphony
+# 克隆主仓库
+git clone https://github.com/YintaTriss/AgentSymphony.git
+cd AgentSymphony
 
 # 安装依赖
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ### 2. 基本使用
 
 ```python
-from agent_family import AgentSymphony
+from agent_symphony.skills.thinking import ThinkingSkill
+from agent_symphony.shared import SharedContext
 
-# 创建交响乐实例
-symphony = AgentSymphony()
+# 创建上下文（自动读取用户的 LLM 配置）
+context = SharedContext()
 
-# 启动对话
-symphony.start("帮我分析这个项目的问题")
+# 创建 thinking 技能
+thinking = ThinkingSkill()
+
+# 执行理解流程
+result = thinking.execute("understand", {
+    "requirement": "帮我分析这个项目的问题"
+})
 ```
 
-### 3. 架构图
+### 3. 技能联动示例
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Agent Symphony                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────┐                                            │
-│  │   thinking  │ ◄── 协调者（Conductor）                     │
-│  └──────┬──────┘                                            │
-│         │                                                   │
-│    ┌────┴────┬────────────┐                                 │
-│    ▼         ▼            ▼                                 │
-│ ┌──────┐ ┌──────┐    ┌──────┐                                │
-│ │memory│ │search│    │team  │                                │
-│ └──┬───┘ └──┬───┘    └──┬───┘                                │
-│    │        │           │                                   │
-│    ▼        ▼           ▼                                   │
-│ ┌──────────────────────────────┐                            │
-│ │        Shared Context         │  ←── 共享上下文            │
-│ └──────────────────────────────┘                            │
-│                                                             │
-│ ┌──────────────────────────────┐                           │
-│ │       Skill Registry          │  ←── 技能注册表           │
-│ └──────────────────────────────┘                           │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+```python
+# thinking 调用 memory 存储偏好
+thinking.call_memory("store", {
+    "type": "preference",
+    "content": "用户喜欢简洁的回复",
+    "importance": 0.8
+})
+
+# thinking 调用 search 搜索信息
+results = thinking.call_search("search", {
+    "query": "OpenClaw skills documentation",
+    "max_results": 5
+})
+
+# thinking 调用 team 执行任务
+thinking.call_team("execute_task", {
+    "plan": [{"task": "写代码", "agent": "coder"}]
+})
 ```
 
 ---
 
-## 目录结构
+## 标准接口
 
-```
-agent-family/
-├── MANIFEST.md          # 家族清单
-├── PROTOCOL.md          # 技能互通协议
-├── README.md            # 本文件
-│
-├── shared/              # 共享模块
-│   ├── registry.py      # 技能注册表
-│   └── context.py       # 共享上下文
-│
-└── skills/             # 子技能
-    ├── thinking/        # 思考技能（协调者）
-    ├── memory/          # 记忆技能
-    ├── search/          # 搜索技能
-    └── team/            # 团队技能（执行者）
+所有技能实现统一接口：
+
+```python
+class Skill:
+    def query(self, capability: str, context: dict) -> dict:
+        """查询技能能力"""
+        
+    def execute(self, action: str, params: dict) -> dict:
+        """执行动作"""
+        
+    def notify(self, event: str, data: dict):
+        """接收事件通知"""
 ```
 
 ---
@@ -198,37 +259,21 @@ agent-family/
 
 ---
 
-## 核心创新
-
-### 1. 提问流程
-thinking 在行动前先向用户提问，确保完全理解需求再执行。
-
-### 2. 双重反思
-- 执行前反思（planning）
-- 执行后反思（reflection）
-
-### 3. 完成度自检
-team 执行完任务后自动检查完成度，不需要人工介入。
-
-### 4. 记忆即学习
-memory 不只是存储，每一次交互都在学习用户偏好。
-
----
-
-## 发展路线
-
-- [ ] v1.0 - 核心骨架完成
-- [ ] v1.1 - thinking 提问流程
-- [ ] v1.2 - memory 智能遗忘
-- [ ] v1.3 - search 多引擎支持
-- [ ] v2.0 - 完整技能联动
-
----
-
 ## 相关项目
 
-- [AgentTeam](https://github.com/YintaTriss/AgentTeam) - 多智能体协作框架
-- [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) - 深度思考框架
+| 项目 | 仓库 | 说明 |
+|------|------|------|
+| AgentSymphony | [GitHub](https://github.com/YintaTriss/AgentSymphony) | 主仓库（技能交响乐） |
+| MemorySkill | [GitHub](https://github.com/YintaTriss/MemorySkill) | 独立记忆技能 |
+| SearchSkill | [GitHub](https://github.com/YintaTriss/SearchSkill) | 独立搜索技能 |
+| AgentTeam | [GitHub](https://github.com/YintaTriss/AgentTeam) | 多智能体协作框架 |
+| Agent-Superthinking | [GitHub](https://github.com/YintaTriss/Agent-Superthinking) | 深度思考框架（thinking 的专家视角） |
+
+---
+
+## License
+
+MIT
 
 ---
 
