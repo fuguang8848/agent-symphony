@@ -26,8 +26,8 @@ thinking (Conductor)
 | Skill | Repo | Role | Core Function |
 |-------|------|------|---------------|
 | **thinking** | [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) | Conductor | Understand, ask, plan, reflect (integrated expert perspectives) |
-| **memory** | [MemorySkill](https://github.com/YintaTriss/MemorySkill) | Memory Center | Vector search, hybrid search, smart forgetting |
-| **search** | [SearchSkill](https://github.com/YintaTriss/SearchSkill) | Info Retrieval | Multi-engine search, result routing |
+| **memory** | [AgentMemory](https://github.com/YintaTriss/AgentMemory) | Memory Center | Vector search, hybrid search, smart forgetting |
+| **search** | [AgentSearch](https://github.com/YintaTriss/AgentSearch) | Info Retrieval | Multi-engine search, result routing |
 | **team** | [AgentTeam](https://github.com/YintaTriss/AgentTeam) | Executor | Task execution, completion check |
 
 ---
