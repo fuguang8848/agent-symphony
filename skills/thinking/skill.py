@@ -34,7 +34,7 @@ if str(SUPER_THINKING_PATH) not in sys.path:
 try:
     from super_thinking.core.extended_registry import ExtendedRegistry as SuperRegistry
     from super_thinking.core.jury import Jury, JuryResult
-    from super_thinking.core.router import Router
+    from super_thinking.core.llm_router import LLMRouter
     from super_thinking.perspectives._interface import PerspectiveOutput
     SUPERTHINKING_AVAILABLE = True
 except ImportError as e:
@@ -43,7 +43,7 @@ except ImportError as e:
     SuperRegistry = None
     Jury = None
     JuryResult = None
-    Router = None
+    LLMRouter = None
     PerspectiveOutput = None
 
 
@@ -144,7 +144,7 @@ class ThinkingSkill:
         if SUPERTHINKING_AVAILABLE:
             self._super_registry = SuperRegistry()
             self._super_registry.discover()
-            self._router = Router(self._super_registry)
+            self._router = LLMRouter(self._super_registry)
             self._jury = Jury(registry=self._super_registry, router=self._router)
         else:
             self._super_registry = None
@@ -560,6 +560,16 @@ class ThinkingSkill:
             ],
         }
         
+        # 优先尝试 LLM 智能路由
+        if self._router and hasattr(self._router, '_route_llm'):
+            try:
+                routing_result = self._router.route(requirement, mode="llm")
+                if routing_result.activated:
+                    return routing_result.activated
+            except Exception:
+                pass  # Fallback to hardcoded config
+        
+        # Fallback: 使用阶段配置的专家团
         selected = PHASE_PERSPECTIVES.get(phase, PHASE_PERSPECTIVES["clarifying"])
         
         # 检查这些 perspective 是否在 registry 中可用
