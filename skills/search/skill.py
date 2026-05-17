@@ -153,6 +153,7 @@ class SearchSkill:
                 "meta": {
                     "skill": "search",
                     "action": action,
+                    "route_to": self._context.get_caller().caller_id if self._context.get_caller() else "user",
                     "duration_ms": int((time.time() - start_time) * 1000)
                 }
             }

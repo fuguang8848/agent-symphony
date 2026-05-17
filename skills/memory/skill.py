@@ -425,6 +425,9 @@ class MemorySkill:
         # 构建候选集
         candidate_ids = set(id_ for id_, _ in vector_results)
         
+        # 将 vector_results 转为 dict 以便快速查找
+        vector_dict = dict(vector_results)
+        
         # 过滤类型和标签
         candidates = []
         for id_ in candidate_ids:
@@ -440,10 +443,7 @@ class MemorySkill:
         scored = []
         for mem in candidates:
             # 向量相似度
-            vector_score = next(
-                (score for id_, score in vector_results if id_ == mem.id),
-                0.0
-            )
+            vector_score = vector_dict.get(mem.id, 0.0)
             
             # 关键词得分
             keyword_score = self._calculate_keyword_score(mem, query_text)
