@@ -1,0 +1,707 @@
+"""
+search 技能 - 搜索与信息获取
+
+Agent Symphony 技能交响乐的信息获取中心
+支持多引擎、爬虫、过滤、排序
+
+增强版：集成真实搜索 API
+- Tavily API (优先)
+- Brave Search API
+- 保留缓存机制与 symphony 协议兼容性
+"""
+
+import os
+import time
+import json
+import hashlib
+from typing import Any, Optional
+from dataclasses import dataclass, field
+from enum import Enum
+
+from agent_symphony.shared import (
+    SharedContext,
+    get_context,
+)
+
+
+class SearchEngine(Enum):
+    """支持的搜索引擎"""
+    TAVILY = "tavily"
+    BRAVE = "brave"
+    EXA = "exa"
+    FIRECRAWL = "firecrawl"
+    PERPLEXITY = "perplexity"
+    MOCK = "mock"
+
+
+@dataclass
+class SearchResult:
+    """搜索结果"""
+    url: str
+    title: str
+    content: str
+    engine: str
+    score: float = 0.0
+    relevance: float = 0.0
+    freshness: str = ""
+    authority: float = 0.0
+    cached: bool = False
+    retrieved_at: float = field(default_factory=time.time)
+
+
+@dataclass
+class SearchConfig:
+    """search 技能配置"""
+    default_engines: list = field(default_factory=lambda: ["tavily"])
+    max_results: int = 10
+    relevance_threshold: float = 0.5
+    cache_ttl: int = 3600  # 1小时
+    timeout: int = 30  # 秒
+    
+    # API 配置
+    tavily_api_key: str = field(default_factory=lambda: os.getenv("TAVILY_API_KEY", ""))
+    brave_api_key: str = field(default_factory=lambda: os.getenv("BRAVE_API_KEY", ""))
+    
+    # 过滤器配置
+    min_content_length: int = 100
+    max_content_length: int = 10000
+    languages: list = field(default_factory=lambda: ["zh", "en"])
+
+
+class SearchAPIError(Exception):
+    """搜索 API 错误"""
+    def __init__(self, engine: str, message: str, status_code: int = 0):
+        self.engine = engine
+        self.message = message
+        self.status_code = status_code
+        super().__init__(f"[{engine}] {message}")
+
+
+class SearchSkill:
+    """
+    Search 技能 - Agent Symphony 的信息获取中心
+    
+    核心职责：
+    1. 多引擎搜索（支持 Tavily、Brave Search）
+    2. 深度爬虫
+    3. 智能过滤
+    4. 结果排序
+    5. 自动缓存
+    """
+
+    def __init__(self, config: SearchConfig | None = None):
+        self.config = config or SearchConfig()
+        self._context: SharedContext = get_context()
+        self._cache: dict[str, list[SearchResult]] = {}  # query_hash -> results
+        self._cache_time: dict[str, float] = {}  # query_hash -> timestamp
+        self._last_search_time: float = 0
+
+    # ==================== 标准接口 ====================
+
+    def query(self, capability: str, context: dict | None = None) -> dict:
+        """
+        查询技能能力
+        """
+        capability_map = {
+            "search.execute": self._execute,
+            "search.crawl": self._crawl,
+            "search.filter": self._filter,
+            "search.rank": self._rank,
+            "search.cache": self._get_cache,
+        }
+        
+        if capability not in capability_map:
+            return {
+                "success": False,
+                "error": {
+                    "code": "CAPABILITY_NOT_FOUND",
+                    "message": f"Capability {capability} not found"
+                }
+            }
+        
+        return capability_map[capability](context or {})
+
+    def execute(self, action: str, params: dict) -> dict:
+        """
+        执行动作
+        """
+        start_time = time.time()
+        
+        try:
+            if action == "search":
+                result = self._search(params)
+            elif action == "crawl":
+                result = self._crawl(params)
+            elif action == "filter":
+                result = self._filter(params)
+            elif action == "rank":
+                result = self._rank(params)
+            elif action == "clear_cache":
+                result = self._clear_cache(params)
+            else:
+                return {
+                    "success": False,
+                    "error": {
+                        "code": "ACTION_NOT_FOUND",
+                        "message": f"Action {action} not found"
+                    }
+                }
+            
+            return {
+                "success": True,
+                "data": result,
+                "meta": {
+                    "skill": "search",
+                    "action": action,
+                    "duration_ms": int((time.time() - start_time) * 1000)
+                }
+            }
+            
+        except SearchAPIError as e:
+            return {
+                "success": False,
+                "error": {
+                    "code": "API_ERROR",
+                    "engine": e.engine,
+                    "message": e.message,
+                    "status_code": e.status_code
+                }
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": {
+                    "code": "EXECUTION_ERROR",
+                    "message": str(e)
+                }
+            }
+
+    def notify(self, event: str, data: dict):
+        """
+        接收事件通知
+        """
+        pass  # 目前没有需要处理的事件
+
+    # ==================== 核心方法 ====================
+
+    def _search(self, params: dict) -> dict:
+        """
+        执行搜索
+        """
+        query = params.get("query", "")
+        engines = params.get("engines", self.config.default_engines)
+        max_results = params.get("max_results", self.config.max_results)
+        filters = params.get("filters", {})
+        
+        if not query:
+            return {
+                "success": False,
+                "error": {"code": "EMPTY_QUERY", "message": "Query is empty"}
+            }
+        
+        # 检查缓存
+        cache_key = self._get_cache_key(query, engines)
+        cached_results = self._get_cached(cache_key)
+        if cached_results:
+            return {
+                "results": [self._result_to_dict(r) for r in cached_results],
+                "cached": True,
+                "count": len(cached_results),
+                "query": query
+            }
+        
+        # 执行多引擎搜索
+        all_results: list[SearchResult] = []
+        used_engines = []
+        
+        for engine in engines:
+            try:
+                if engine == "tavily" and self.config.tavily_api_key:
+                    results = self._search_tavily(query, max_results)
+                    used_engines.append("tavily")
+                elif engine == "brave" and self.config.brave_api_key:
+                    results = self._search_brave(query, max_results)
+                    used_engines.append("brave")
+                elif engine in ("tavily", "brave", "exa", "perplexity"):
+                    # API 未配置时跳过
+                    continue
+                else:
+                    # 未知引擎或 mock
+                    results = self._execute_search_mock(query, max_results)
+                    used_engines.append("mock")
+                
+                all_results.extend(results)
+            except SearchAPIError as e:
+                # 单个引擎失败不影响其他引擎
+                continue
+        
+        # 如果所有真实 API 都失败了，使用 mock
+        if not all_results:
+            all_results = self._execute_search_mock(query, max_results)
+            used_engines = ["mock"]
+        
+        # 去重（按 URL）
+        seen_urls = set()
+        unique_results = []
+        for r in all_results:
+            if r.url not in seen_urls:
+                seen_urls.add(r.url)
+                unique_results.append(r)
+        
+        # 过滤
+        if filters:
+            unique_results = self._apply_filters(unique_results, filters)
+        
+        # 排序
+        unique_results = self._rank_results(unique_results, filters)
+        
+        # 限制数量
+        unique_results = unique_results[:max_results]
+        
+        # 缓存
+        self._cache[cache_key] = unique_results
+        self._cache_time[cache_key] = time.time()
+        self._last_search_time = time.time()
+        
+        # 更新上下文
+        self._context.set_search_query(query)
+        self._context.set_search_results([
+            {"url": r.url, "title": r.title, "content": r.content[:100]}
+            for r in unique_results
+        ])
+        
+        return {
+            "results": [self._result_to_dict(r) for r in unique_results],
+            "cached": False,
+            "count": len(unique_results),
+            "query": query,
+            "engines": used_engines
+        }
+
+    # ==================== Tavily API ====================
+
+    def _search_tavily(self, query: str, max_results: int = 10) -> list[SearchResult]:
+        """
+        使用 Tavily API 执行搜索
+        
+        API 文档: https://docs.tavily.com/
+        """
+        import urllib.request
+        import urllib.parse
+        
+        url = "https://api.tavily.com/search"
+        
+        payload = json.dumps({
+            "query": query,
+            "search_depth": "basic",
+            "max_results": max_results,
+            "include_answer": False,
+            "include_raw_content": False,
+            "include_images": False,
+        })
+        
+        headers = {
+            "Authorization": f"Bearer {self.config.tavily_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        req = urllib.request.Request(
+            url,
+            data=payload.encode("utf-8"),
+            headers=headers,
+            method="POST"
+        )
+        
+        try:
+            with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise SearchAPIError(
+                "tavily",
+                f"HTTP {e.code}: {error_body[:200]}",
+                status_code=e.code
+            )
+        except urllib.error.URLError as e:
+            raise SearchAPIError("tavily", f"URL Error: {str(e.reason)}")
+        
+        results = []
+        for item in data.get("results", []):
+            results.append(SearchResult(
+                url=item.get("url", ""),
+                title=item.get("title", ""),
+                content=item.get("content", ""),
+                engine="tavily",
+                score=item.get("score", 0.0),
+                relevance=item.get("score", 0.0),
+                freshness=item.get("published_date", ""),
+                authority=0.5  # Tavily 不提供权威性评分
+            ))
+        
+        return results
+
+    # ==================== Brave Search API ====================
+
+    def _search_brave(self, query: str, max_results: int = 10) -> list[SearchResult]:
+        """
+        使用 Brave Search API 执行搜索
+        
+        API 文档: https://api.search.brave.com/app/documentation/web-search/get-started
+        """
+        import urllib.request
+        import urllib.parse
+        
+        base_url = "https://api.search.brave.com/res/v1/web/search"
+        
+        params = urllib.parse.urlencode({
+            "q": query,
+            "count": min(max_results, 20),  # Brave 最多 20
+        })
+        
+        url = f"{base_url}?{params}"
+        
+        headers = {
+            "Accept": "application/json",
+            "X-Subscription-Token": self.config.brave_api_key
+        }
+        
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        
+        try:
+            with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise SearchAPIError(
+                "brave",
+                f"HTTP {e.code}: {error_body[:200]}",
+                status_code=e.code
+            )
+        except urllib.error.URLError as e:
+            raise SearchAPIError("brave", f"URL Error: {str(e.reason)}")
+        
+        results = []
+        web_results = data.get("web", {}).get("results", [])
+        
+        for item in web_results:
+            # Brave 提供 age 和 meta_url 信息
+            age = item.get("age", "")
+            
+            results.append(SearchResult(
+                url=item.get("url", ""),
+                title=item.get("title", ""),
+                content=item.get("description", ""),
+                engine="brave",
+                score=0.0,  # Brave 不直接提供分数
+                relevance=0.0,
+                freshness=age,
+                authority=0.5  # Brave 不提供权威性评分
+            ))
+        
+        return results
+
+    # ==================== Mock 实现（备选） ====================
+
+    def _execute_search_mock(self, query: str, max_results: int) -> list[SearchResult]:
+        """
+        Mock 搜索结果（当没有配置 API 时使用）
+        """
+        mock_results = [
+            SearchResult(
+                url="https://example.com/article1",
+                title=f"关于 {query} 的文章 1",
+                content=f"这是关于 {query} 的详细内容，包含多个方面的信息...",
+                engine="mock",
+                score=0.95,
+                relevance=0.9,
+                freshness="2024-01",
+                authority=0.8
+            ),
+            SearchResult(
+                url="https://example.com/article2",
+                title=f"{query} 详解",
+                content=f"深入分析 {query} 的各个方面，包括原理、实践和案例...",
+                engine="mock",
+                score=0.88,
+                relevance=0.85,
+                freshness="2024-02",
+                authority=0.75
+            ),
+            SearchResult(
+                url="https://example.com/article3",
+                title=f"如何正确理解 {query}",
+                content=f"本指南帮助你理解 {query} 的核心概念和应用场景...",
+                engine="mock",
+                score=0.82,
+                relevance=0.78,
+                freshness="2024-03",
+                authority=0.7
+            ),
+        ]
+        
+        return mock_results[:max_results]
+
+    # 保留旧方法名以保持兼容性
+    def _execute_search(self, query: str, engines: list, max_results: int) -> list[SearchResult]:
+        """兼容旧接口"""
+        return self._execute_search_mock(query, max_results)
+
+    def _execute(self, context: dict) -> dict:
+        """执行搜索（接口兼容）"""
+        return self._search(context)
+
+    # ==================== 爬虫接口 ====================
+
+    def _crawl(self, params: dict) -> dict:
+        """
+        深度爬取
+        
+        支持：
+        - 直接返回模拟内容（无 API 时）
+        - Tavily Extract API（未来扩展）
+        """
+        url = params.get("url", "")
+        
+        if not url:
+            return {
+                "success": False,
+                "error": {"code": "EMPTY_URL", "message": "URL is empty"}
+            }
+        
+        # 优先尝试 Tavily Extract（如果配置了 API）
+        if self.config.tavily_api_key:
+            try:
+                return self._crawl_tavily(url)
+            except SearchAPIError:
+                pass  # 降级到模拟
+        
+        # 模拟爬取
+        return {
+            "url": url,
+            "content": f"从 {url} 爬取的内容...",
+            "title": "爬取的页面标题",
+            "links": ["https://example.com/link1", "https://example.com/link2"],
+            "crawled_at": time.time()
+        }
+
+    def _crawl_tavily(self, url: str) -> dict:
+        """
+        使用 Tavily Extract API 深度爬取页面
+        
+        API: POST https://api.tavily.com/extract
+        """
+        import urllib.request
+        import urllib.error
+        
+        api_url = "https://api.tavily.com/extract"
+        
+        payload = json.dumps({
+            "urls": [url]
+        })
+        
+        headers = {
+            "Authorization": f"Bearer {self.config.tavily_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        req = urllib.request.Request(
+            api_url,
+            data=payload.encode("utf-8"),
+            headers=headers,
+            method="POST"
+        )
+        
+        try:
+            with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise SearchAPIError(
+                "tavily",
+                f"Extract HTTP {e.code}: {error_body[:200]}",
+                status_code=e.code
+            )
+        except urllib.error.URLError as e:
+            raise SearchAPIError("tavily", f"Extract URL Error: {str(e.reason)}")
+        
+        results = data.get("results", [])
+        if results:
+            result = results[0]
+            return {
+                "url": url,
+                "content": result.get("raw_content", ""),
+                "title": result.get("title", ""),
+                "links": [],  # Tavily extract 不返回链接
+                "crawled_at": time.time()
+            }
+        
+        return {
+            "url": url,
+            "content": "",
+            "title": "",
+            "links": [],
+            "crawled_at": time.time()
+        }
+
+    # ==================== 过滤与排序 ====================
+
+    def _filter(self, params: dict) -> dict:
+        """
+        过滤搜索结果
+        """
+        results_data = params.get("results", [])
+        filters = params.get("filters", {})
+        
+        # 转换为 SearchResult 对象
+        results = [
+            SearchResult(**r) if isinstance(r, dict) else r
+            for r in results_data
+        ]
+        
+        # 应用过滤
+        filtered = self._apply_filters(results, filters)
+        
+        return {
+            "results": [self._result_to_dict(r) for r in filtered],
+            "count": len(filtered),
+            "original_count": len(results)
+        }
+
+    def _apply_filters(self, results: list[SearchResult], filters: dict) -> list[SearchResult]:
+        """
+        应用过滤规则
+        """
+        filtered = results
+        
+        # 相关性过滤
+        if "relevance" in filters:
+            min_relevance = filters["relevance"]
+            filtered = [r for r in filtered if r.relevance >= min_relevance]
+        
+        # 语言过滤
+        if "languages" in filters:
+            languages = filters["languages"]
+            # 简化实现
+            filtered = [r for r in filtered]  # TODO: 实际检查语言
+        
+        # 时效性过滤
+        if "freshness" in filters:
+            # 简化实现
+            pass
+        
+        # 权威性过滤
+        if "authority" in filters:
+            min_authority = filters["authority"]
+            filtered = [r for r in filtered if r.authority >= min_authority]
+        
+        return filtered
+
+    def _rank(self, params: dict) -> dict:
+        """
+        排序搜索结果
+        """
+        results_data = params.get("results", [])
+        criteria = params.get("criteria", {})
+        
+        results = [
+            SearchResult(**r) if isinstance(r, dict) else r
+            for r in results_data
+        ]
+        
+        ranked = self._rank_results(results, criteria)
+        
+        return {
+            "results": [self._result_to_dict(r) for r in ranked],
+            "count": len(ranked)
+        }
+
+    def _rank_results(self, results: list[SearchResult], criteria: dict) -> list[SearchResult]:
+        """
+        对搜索结果排序
+        """
+        weights = {
+            "relevance": criteria.get("relevance_weight", 0.4),
+            "freshness": criteria.get("freshness_weight", 0.3),
+            "authority": criteria.get("authority_weight", 0.2),
+            "score": criteria.get("score_weight", 0.1),
+        }
+        
+        def calculate_rank_score(r: SearchResult) -> float:
+            return (
+                r.relevance * weights["relevance"] +
+                r.authority * weights["authority"] +
+                r.score * weights["score"]
+            )
+        
+        return sorted(results, key=calculate_rank_score, reverse=True)
+
+    # ==================== 缓存接口 ====================
+
+    def _get_cache(self, context: dict) -> dict:
+        """获取缓存"""
+        query = context.get("query", "")
+        engines = context.get("engines", self.config.default_engines)
+        cache_key = self._get_cache_key(query, engines)
+        
+        cached = self._get_cached(cache_key)
+        
+        return {
+            "cached": cached is not None,
+            "results": [self._result_to_dict(r) for r in cached] if cached else [],
+            "cache_key": cache_key
+        }
+
+    def _clear_cache(self, params: dict) -> dict:
+        """清空缓存"""
+        count = len(self._cache)
+        self._cache = {}
+        self._cache_time = {}
+        return {"cleared": True, "count": count}
+
+    # ==================== 辅助方法 ====================
+
+    def _get_cache_key(self, query: str, engines: list) -> str:
+        """生成缓存 key"""
+        content = f"{query}:{','.join(sorted(engines))}"
+        return hashlib.md5(content.encode()).hexdigest()
+
+    def _get_cached(self, cache_key: str) -> list[SearchResult] | None:
+        """获取缓存结果"""
+        if cache_key not in self._cache:
+            return None
+        
+        cached = self._cache[cache_key]
+        cache_time = self._cache_time.get(cache_key, 0)
+        
+        # 检查是否过期
+        if time.time() - cache_time > self.config.cache_ttl:
+            del self._cache[cache_key]
+            if cache_key in self._cache_time:
+                del self._cache_time[cache_key]
+            return None
+        
+        # 标记为缓存
+        for r in cached:
+            r.cached = True
+        
+        return cached
+
+    def _result_to_dict(self, result: SearchResult) -> dict:
+        """转换结果为字典"""
+        return {
+            "url": result.url,
+            "title": result.title,
+            "content": result.content,
+            "engine": result.engine,
+            "score": result.score,
+            "relevance": result.relevance,
+            "freshness": result.freshness,
+            "authority": result.authority,
+            "cached": result.cached,
+            "retrieved_at": result.retrieved_at
+        }
+
+
+def get_skill_instance(config: SearchConfig | None = None) -> SearchSkill:
+    """获取 search 技能实例"""
+    return SearchSkill(config=config)
