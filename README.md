@@ -27,7 +27,7 @@ thinking (协调者)
 
 | 技能 | 仓库 | 角色 | 核心功能 |
 |------|------|------|----------|
-| **thinking** | [AgentSymphony](https://github.com/YintaTriss/AgentSymphony) | 协调者 | 理解需求、提问、规划、反思 |
+| **thinking** | [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) | 协调者 | 理解需求、提问、规划、反思（集成专家视角） |
 | **memory** | [MemorySkill](https://github.com/YintaTriss/MemorySkill) | 记忆中心 | 向量检索、混合搜索、智能遗忘 |
 | **search** | [SearchSkill](https://github.com/YintaTriss/SearchSkill) | 信息获取 | 多引擎搜索、结果路由 |
 | **team** | [AgentTeam](https://github.com/YintaTriss/AgentTeam) | 执行者 | 任务执行、完成度检查 |

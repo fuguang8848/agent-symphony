@@ -10,12 +10,12 @@
 
 ## 家族成员
 
-| 技能 | 版本 | 角色 | 核心能力 |
-|------|------|------|----------|
-| **thinking** | 2.3+ | 协调者 | 理解需求、深度分析、规划、反思、提问 |
-| **memory** | 1.0+ | 记忆中心 | 偏好、上下文、学习定位、智能遗忘 |
-| **search** | 1.0+ | 信息获取 | Web搜索、本地检索、爬虫、过滤、排序 |
-| **team** | 0.7.6+ | 执行者 | 任务执行、完成度检查 |
+| 技能 | 版本 | 仓库 | 角色 | 核心能力 |
+|------|------|------|------|----------|
+| **thinking** | 2.3+ | [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) | 协调者 | 理解需求、深度分析、规划、反思、提问 |
+| **memory** | 1.0+ | [MemorySkill](https://github.com/YintaTriss/MemorySkill) | 记忆中心 | 偏好、上下文、学习定位、智能遗忘 |
+| **search** | 1.0+ | [SearchSkill](https://github.com/YintaTriss/SearchSkill) | 信息获取 | Web搜索、本地检索、爬虫、过滤、排序 |
+| **team** | 0.7.6+ | [AgentTeam](https://github.com/YintaTriss/AgentTeam) | 执行者 | 任务执行、完成度检查 |
 
 ---
 
