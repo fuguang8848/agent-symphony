@@ -1,171 +1,86 @@
 ---
 name: agent-symphony
-version: 1.0.0
+version: 1.1.0
 family: compound-engineering
 description: 多技能底层互通的Agent框架 - 协调thinking/memory/search/team四大技能，提供理解需求、深度分析、规划、反思、记忆存储、信息检索、任务执行等综合能力
 argument-hint: "[需求描述或任务说明]"
+examples:
+  - "我想搞量化交易"
+  - "帮我分析石榴籽项目"
+  - "给我制定一个Python学习计划"
 ---
 
 # Agent Symphony 技能交响乐
 
 > 多技能底层互通，1+1 > 2 的质变效果
 
-## 简介
+## 一键使用
 
-Agent Symphony 是一个多技能底层互通的 Agent 框架，包含四大核心技能协调工作：
+```
+/symphony 我想搞量化交易
+```
 
-| 技能 | 角色 | 核心能力 |
-|------|------|----------|
+## 核心技能
+
+| 技能 | 角色 | 说明 |
+|------|------|------|
 | **thinking** | 协调者 | 理解需求、提问、分析、规划、反思 |
-| **memory** | 记忆中心 | 存储、检索、学习、遗忘 |
-| **search** | 信息获取 | Web搜索、本地检索、过滤、排序 |
+| **memory** | 记忆中心 | 向量检索、混合搜索、智能遗忘 |
+| **search** | 信息获取 | 多引擎搜索、结果路由 |
 | **team** | 执行者 | 任务执行、完成度检查 |
 
 ## 工作流程
 
 ```
-用户需求
-    ↓
-┌─────────────────────────────────────┐
-│  阶段一：思考（Thinking）             │
-│  - 向用户提问，澄清需求              │
-│  - 动用 search 获取信息              │
-│  - 动用 memory 记录偏好               │
-└─────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────┐
-│  阶段二：规划（Planning）            │
-│  - 制定行动计划                      │
-│  - 向用户确认计划                    │
-└─────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────┐
-│  阶段三：执行（Team）                │
-│  - 执行任务                          │
-│  - 自我检查完成度                    │
-│  - 如有问题自行调整重试              │
-└─────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────┐
-│  阶段四：反思（Thinking）             │
-│  - 与用户讨论结果                    │
-│  - 决定是否需要继续                  │
-└─────────────────────────────────────┘
+用户需求 → 理解 → 提问澄清 → 制定计划 → 执行 → 反思
 ```
 
-## 核心能力
+## 使用方式
 
-### 1. thinking - 协调者技能
+### 方式一：CLI 快速使用
 
-| 能力 | 说明 |
-|------|------|
-| `thinking.analyze` | 深度分析需求 |
-| `thinking.ask` | 生成澄清问题 |
-| `thinking.evaluate` | 评估需求明确度 |
-| `thinking.plan` | 制定行动计划 |
-| `thinking.reflect` | 反思总结 |
+```bash
+# 直接运行
+python agent_symphony_cli.py "我想搞量化交易"
 
-### 2. memory - 记忆技能
-
-| 能力 | 说明 |
-|------|------|
-| `memory.store` | 存储记忆 |
-| `memory.query` | 查询记忆 |
-| `memory.learn` | 从交互中学习 |
-| `memory.forget` | 主动遗忘 |
-| `memory.preference` | 偏好管理 |
-
-### 3. search - 搜索技能
-
-| 能力 | 说明 |
-|------|------|
-| `search.query` | 执行搜索 |
-| `search.filter` | 过滤结果 |
-| `search.rank` | 排序结果 |
-
-### 4. team - 执行技能
-
-| 能力 | 说明 |
-|------|------|
-| `team.execute` | 执行任务 |
-| `team.check` | 完成度检查 |
-| `team.retry` | 失败重试 |
-
-## 技能联动
-
-```
-thinking (协调者)
-    ├──→ memory.store()    # 存储偏好/上下文
-    ├──→ memory.query()   # 查询记忆
-    ├──→ search.execute()  # 搜索信息
-    └──→ team.execute()   # 执行任务
+# 交互模式
+python agent_symphony_cli.py -i
 ```
 
-## 使用场景
+### 方式二：模块调用
 
-- **复杂任务分解**：需要多步骤协调的任务
-- **深度分析**：需要提问澄清、全面思考的任务
-- **信息检索**：需要搜索、过滤、整理信息的任务
-- **记忆管理**：需要持久化上下文、用户偏好的任务
-- **任务执行**：需要执行计划、检查完成度的任务
+```python
+from agent_symphony import ThinkingSkill, MemorySkill, SearchSkill
+from agent_symphony.shared import SharedContext
 
-## 与其他技能的关系
+# 初始化
+context = SharedContext()
+thinking = ThinkingSkill()
+memory = MemorySkill()
 
-Agent Symphony 与以下技能协同工作：
-
-- **子技能**：`thinking`, `memory`, `search`, `team` - 由 Agent Symphony 统一协调
-- **AgentTeam**：多智能体协作框架，可与 Agent Symphony 配合
-- **Agent-Superthinking**：深度思考框架，可与 Agent Symphony 配合
-
-## 技术架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Agent Symphony                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────┐                                            │
-│  │   thinking  │ ◄── 协调者（Conductor）                     │
-│  └──────┬──────┘                                            │
-│         │                                                   │
-│    ┌────┴────┬────────────┐                                 │
-│    ▼         ▼            ▼                                 │
-│ ┌──────┐ ┌──────┐    ┌──────┐                                │
-│ │memory│ │search│    │team  │                                │
-│ └──┬───┘ └──┬───┘    └──┬───┘                                │
-│    │        │           │                                   │
-│    ▼        ▼           ▼                                   │
-│ ┌──────────────────────────────┐                            │
-│ │        Shared Context         │  ←── 共享上下文            │
-│ └──────────────────────────────┘                            │
-│                                                             │
-│ ┌──────────────────────────────┐                           │
-│ │       Skill Registry          │  ←── 技能注册表           │
-│ └──────────────────────────────┘                           │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+# 理解需求
+result = thinking.execute("understand", {
+    "requirement": "我想搞量化交易"
+})
 ```
 
-## 目录结构
+## CLI 功能
 
-```
-agent-symphony/
-├── MANIFEST.md          # 家族清单
-├── PROTOCOL.md          # 技能互通协议
-├── SKILL.md             # 本文件 - OpenClaw技能描述
-│
-├── shared/              # 共享模块
-│   ├── registry.py      # 技能注册表
-│   └── context.py       # 共享上下文
-│
-└── skills/             # 子技能
-    ├── thinking/        # 思考技能（协调者）
-    ├── memory/          # 记忆技能
-    ├── search/          # 搜索技能
-    └── team/            # 团队技能（执行者）
-```
+- ✅ 需求理解 + 明确度评估
+- ✅ 澄清问题生成
+- ✅ 行动计划制定
+- ✅ 记忆存储
+- ✅ 交互模式（输入问题持续对话）
+- ✅ 内置命令（memory / search）
+
+## 插入式 LLM
+
+自动从环境变量检测：
+- OPENAI_API_KEY
+- DASHSCOPE_API_KEY  
+- MINIMAX_API_KEY
+- DEEPSEEK_API_KEY
 
 ---
 
 _技能交响乐 · Agent Symphony_
-_让 AI 技能像交响乐一样和谐共鸣_
