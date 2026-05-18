@@ -1,17 +1,25 @@
 ---
 name: agent-symphony-integration
-version: 1.1.0
+version: 1.2.0
 family: compound-engineering
 description: "AgentSymphony 交响乐技能。提供多轮对话式任务编排，自动协调 thinking/memory/search/team 技能。适用于复杂任务的需求澄清、多技能协作和规划执行。"
 argument-hint: "[需求描述]"
+triggers:
+  - 启动交响乐
+  - 交响乐
+  - symphony
 ---
 
 # AgentSymphony OpenClaw 集成
 
 ## ⚠️ AI 助手路由说明（重要）
 
-**交响乐的启动由 LLM（AI 助手）根据任务性质判断，不需要 examples 匹配：**
+**交响乐有两种启动方式，互补：：**
 
+### 被动触发（优先级最高）
+用户明确说"启动交响乐"、"交响乐"时，AI 助手**立即启动**，不做任何判断。
+
+### 主动判断（LLM 决定）
 当用户描述的需求具有以下特征时，AI 助手应启动交响乐工作流：
 
 1. **需要多轮澄清** — 目标不明确，需要提问才能搞清楚
