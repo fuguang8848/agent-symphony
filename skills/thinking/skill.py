@@ -770,13 +770,17 @@ class ThinkingSkill:
         ]
 
         try:
-            # 后台启动，不等待
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
+            # 后台启动，不等待（跨平台兼容）
+            popen_kwargs = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+            }
+            if sys.platform != "win32":
+                popen_kwargs["start_new_session"] = True
+            else:
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+            proc = subprocess.Popen(cmd, **popen_kwargs)
             logging.info(f"[Thinking] Jury agent spawned, pid={proc.pid}")
         except Exception as e:
             logging.warning(f"[Thinking] Failed to spawn jury agent: {e}")
