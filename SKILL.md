@@ -1,8 +1,8 @@
 ---
 name: agent-symphony-integration
-version: 2.1.0
+version: 2.2.0
 family: compound-engineering
-description: "AgentSymphony 交响乐技能。提供多轮对话式任务编排，自动协调 thinking/memory/search/team 技能。适用于复杂任务的需求澄清、多技能协作和规划执行。"
+description: "AgentSymphony 交响乐技能。定义多技能协作工作流规范，由 AI 助手（楚灵）作为指挥者执行。适用于复杂任务的需求澄清、多技能协作和规划执行。"
 argument-hint: "[需求描述]"
 triggers:
   - 启动交响乐
@@ -12,15 +12,14 @@ triggers:
 
 # AgentSymphony OpenClaw 集成
 
-## 核心原则
+## 核心定位（最重要）
 
-**工作流分阶段，每个阶段有明确的职责。**
+**交响乐是一份工作流规范，不是运行程序。AI 助手（楚灵）才是执行者。**
 
-- **clarifying 阶段**：调用 thinking 技能进行需求分析、提问澄清
-- **planning 阶段**：AI助手（指挥者）直接制定执行计划
-- **executing 阶段**：AI助手（指挥者）协调 AgentTeam 执行
+- 交响乐（SKILL.md）= 工作流规范文档，定义"做什么"
+- AI 助手（楚灵）= 执行者，负责"怎么做"
 
-AI助手在 clarifying 阶段不能跳过 thinking 技能，但在 planning 和 executing 阶段由 AI助手自行主导。
+AI 助手读懂 SKILL.md 后，按照规范调用各个技能完成工作流。交响乐本身不运行、不调用任何代码。
 
 ---
 
@@ -29,20 +28,33 @@ AI助手在 clarifying 阶段不能跳过 thinking 技能，但在 planning 和 
 ```
 用户描述需求
     ↓
-[clarifying] thinking 技能 ← AI助手主导：提问、澄清、分析
+[clarifying] AI助手主导：提问、澄清、分析
     ↓
-memory 技能 ← 需求明确后存入记忆
+    调用 Agent-Superthinking 专家视角分析
+    调用 memory 技能存入需求
     ↓
 [planning] AI助手制定执行计划
     ↓
-memory 技能 ← 计划存入记忆
+    调用 memory 技能存入计划
     ↓
-[executing] AI助手调用 team 技能
+[executing] AI助手协调执行
     ↓
-AgentTeam ← 实际执行任务
+    调用 AgentTeam 执行任务
     ↓
-AI助手反思结果，评估目标达成
+AI助手反思结果
 ```
+
+---
+
+## AI 助手在交响乐中的职责
+
+**我（楚灵）就是交响乐的指挥者。**
+
+- 读取并遵循 SKILL.md 定义的工作流
+- 在 clarifying 阶段：主导提问澄清，调用专家视角分析
+- 在 planning 阶段：直接制定执行计划
+- 在 executing 阶段：协调 AgentTeam 执行
+- 全程调用 memory/search/AgentTeam 等技能
 
 ---
 
@@ -52,67 +64,28 @@ AI助手反思结果，评估目标达成
 clarifying（澄清）→ planning（计划）→ executing（执行）→ completed（完成）
 ```
 
-- **clarifying**：调用 thinking 技能，分析需求，向用户提问澄清
-- **planning**：AI助手（指挥者）直接制定执行计划
-- **executing**：调用 AgentTeam 执行，监控进度
-- **completed**：反思总结，输出结果
+- **clarifying**：AI助手（楚灵）主导提问澄清，调用 Agent-Superthinking 分析
+- **planning**：AI助手直接制定执行计划
+- **executing**：调用 AgentTeam 执行
+- **completed**：反思总结
 
 ---
 
-## AI 助手路由说明
+## 交响乐与 Agent-Superthinking 的关系
 
-**交响乐有两种启动方式，互补：**
+- **交响乐** = 工作流规范（SKILL.md）
+- **Agent-Superthinking** = 专家视角分析工具（在 clarifying 阶段被 AI助手调用）
+
+---
+
+## 触发方式
 
 ### 被动触发（优先级最高）
-用户明确说"启动交响乐"、"交响乐"时，AI 助手**立即启动**，不做任何判断。
+用户说"启动交响乐"、"交响乐" → AI助手立即按规范执行工作流
 
-### 主动判断（LLM 决定）
-当用户描述的需求具有以下特征时，AI 助手应启动交响乐工作流：
-
-1. **需要多轮澄清** — 目标不明确，需要提问才能搞清楚
-2. **需要多技能协作** — 涉及 memory、search、team 等多个技能的配合
-3. **需要规划执行** — 要分解任务、制定步骤、协调执行
-4. **复杂/模糊任务** — 用户自己也不确定怎么做，需要分析讨论
-
-**不需要启动交响乐的情况：**
-- 用户问题非常明确，不需要澄清
-- 是简单的知识问答或直接操作
-- 只需要单次回答，不需要多轮对话
+### 主动判断
+用户描述复杂需求 → AI助手自动启动交响乐工作流
 
 ---
 
-## API
-
-```python
-from agent_symphony_openclaw import SymphonySession
-
-session = SymphonySession()
-
-# 启动
-result = session.handle("启动交响乐")
-
-# clarifying 阶段：thinking 分析用户需求
-result = session.handle("我想做量化交易")
-
-# result:
-{
-    "response": "* 根据你的需求...",      # thinking 分析后的回复
-    "skill_requests": [],                   # 技能申请
-    "state": "clarifying",                # 当前状态
-    "done": False,
-    "questions": [],                       # thinking 生成的问题
-    "success": True
-}
-```
-
----
-
-## 注意事项
-
-1. **clarifying 阶段必须调用 thinking** - 这是唯一必须调用 thinking 的阶段
-2. **AI 助手是指挥者** - planning 和 executing 由 AI助手直接主导
-3. **会话隔离** - 每个用户有独立的 SymphonySession
-
----
-
-_AgentSymphony OpenClaw Integration v2.1.0_
+_AgentSymphony OpenClaw Integration v2.2.0_
