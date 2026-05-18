@@ -1,5 +1,7 @@
 # AgentSymphony OpenClaw 集成指南
 
+> **跨平台支持**：Windows / macOS / Linux (Python 3.10+) ✅
+
 ## 安装说明
 
 ### 新用户安装步骤
