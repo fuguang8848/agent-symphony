@@ -1,49 +1,89 @@
 # AgentSymphony OpenClaw 集成指南
 
+## 安装说明
+
+### 新用户安装步骤
+
+1. **克隆仓库**
+   ```bash
+   cd ~/.openclaw/workspace
+   git clone https://github.com/YintaTriss/AgentSymphony
+   ```
+
+2. **移动到正确位置**
+   ```bash
+   # 如果 OpenClaw 的 skills 目录在 .agents/skills/compound-engineering/
+   mv AgentSymphony ~/.openclaw/workspace/.agents/skills/compound-engineering/agent-symphony
+   ```
+   或者，把 `AgentSymphony/` 里的 `agent-symphony/` 目录（即 skills/ 和相关文件）放到你的 `.agents/skills/` 下。
+
+3. **重启 OpenClaw**
+   ```bash
+   openclaw gateway restart
+   ```
+
+---
+
 ## 概述
 
-本文档说明 AgentSymphony（技能交响乐）如何集成到 OpenClaw 中。
+AgentSymphony（技能交响乐）是一个多技能协作**工作流**，不是独立程序。AI 助手（楚灵）就是这个工作流的**指挥者**，没有额外的"指挥家"角色。
 
-**重要说明：** OpenClaw 的 WebChat 频道不支持 slash command 路由。用户无法通过 `/symphony` 触发技能。正确的方式是通过**自然语言描述需求**触发 OpenClaw 的 skill matching。
+**AI 助手（楚灵）在交响乐中的职责：**
+- 判断何时启动交响乐（被动触发 + 主动判断）
+- 通过 thinking 技能与用户对话澄清需求
+- 协调所有技能的调用时机（memory、search、AgentTeam）
+- 整合结果，回应用户
+- 调用 AgentTeam 执行计划
 
-## 触发方式
+## 触发方式（重要）
 
-OpenClaw 根据 SKILL.md 中的 description + examples 进行 skill matching：
+**被动触发：** 用户说"启动交响乐"、"交响乐"、"symphony" → AI助手立即启动
 
-| 用户输入 | 说明 |
-|----------|------|
-| `我想用交响乐` | 启动交响乐 |
-| `交响乐帮我规划项目` | 带需求启动 |
-| `我需要一个完整的量化交易系统` | 直接带需求 |
+**主动判断：** 用户描述复杂需求（需要多轮澄清、多技能协作、规划执行）→ AI助手自动判断启动
 
-OpenClaw 识别到交响乐需求后，调用本技能的 Python 代码。
+## 触发判断示例
 
-## 集成架构
+| 用户输入 | 是否启动交响乐 |
+|----------|--------------|
+| `启动交响乐` | ✅ 立即启动 |
+| `交响乐帮我做量化交易` | ✅ 立即启动 |
+| `交响乐是什么` | ❌ 只是询问，不是启动 |
+| `我想做量化交易但不知道怎么做` | ✅ AI判断后启动 |
+| `1+1等于几` | ❌ 简单问答，不启动 |
+
+## 工作流
+
+```
+用户描述需求
+    ↓
+thinking 技能 ← AI助手（楚灵）主导：提问、澄清、分析
+    ↓
+memory 技能 ← 需求/计划明确后存入记忆
+    ↓
+planning（计划阶段）← AI助手制定执行计划
+    ↓
+memory 技能 ← 计划存入记忆
+    ↓
+AgentTeam ← AI助手调用 team 技能执行
+```
+
+**自然调用：** 过程中需要搜索时，AI助手自然调用 search 技能；需要记忆时调用 memory 技能。不需要手动管理。
+
+## 架构
 
 ```
 用户消息（自然语言）
     ↓
 OpenClaw 消息处理器
     ↓
-Skill Matching（根据 description/examples）
+Skill Matching（检测到交响乐需求）
     ↓
-agent_symphony_openclaw.SymphonySession
+SymphonySession（AI助手楚灵在内部协调）
     ↓
-thinking.execute("dialog", {...})
+thinking / memory / search / AgentTeam 技能
     ↓
-返回 response + skill_requests
-    ↓
-（可选）执行 skill_requests
-    ↓
-继续对话直到 done=True
+返回 response 给用户
 ```
-
-## LLM 自动接入
-
-交响乐的 LLM 智力来自 OpenClaw 运行时。技能不携带 API Key，通过 OpenClaw 上下文调用 LLM：
-
-- OpenClaw 配置的模型（MiniMax、DeepSeek 等）
-- 自动检测，无需额外配置
 
 ## 核心接口
 
@@ -66,76 +106,16 @@ result = session.handle("我想做一个量化交易系统")
 }
 ```
 
-### execute_skill(skill, action, params)
-
-处理技能申请（可选，不处理时交响乐降级为纯对话）：
-
-```python
-skill_map = {
-    "thinking": ThinkingSkillInstance,
-    "memory": MemorySkillInstance,
-    "search": SearchSkillInstance,
-    "team": TeamSkillInstance,
-}
-
-for req in result.get("skill_requests", []):
-    skill = req["skill"]
-    action = req["action"]
-    params = req["params"]
-
-    skill_result = skill_map[skill].execute(action, params)
-    session.notify_skill_result(skill, skill_result)
-```
-
-### notify_skill_result(skill, result)
-
-技能执行完成后回调：
-
-```python
-session.notify_skill_result("memory", {
-    "success": True,
-    "data": {...}
-})
-```
-
 ## 会话状态
 
-每个用户维护独立的 SymphonySession：
-
-```python
-class SymphonySession:
-    session_id: str            # 会话 ID
-    thinking: ThinkingSkill     # thinking 技能实例
-    memory: MemorySkill        # memory 技能实例
-    search: SearchSkill        # search 技能实例
-    phase: str                 # clarifying | planning | executing | completed
-    done: bool                 # 是否完成
-    created_at: float          # 创建时间
+```
+clarifying（澄清）→ planning（计划）→ executing（执行）→ completed（完成）
 ```
 
-## 示例对话流
-
-```
-用户: "我想用交响乐"
-    ↓
-SymphonySession.handle("")
-    ↓
-返回: "你好，我是指挥。请告诉我你想要完成的事情吧。"
-
-用户: "我想搞量化交易"
-    ↓
-SymphonySession.handle("我想搞量化交易")
-    ↓
-返回: "让我确认一下...\n\n1. 你目前有编程基础吗？\n2. 有具体时间要求吗？"
-
-用户: "完全新手，没时间限制"
-    ↓
-SymphonySession.handle("完全新手，没时间限制", answers={...})
-    ↓
-返回: "明白了。需求已清晰，我来制定计划..."
-    ↓
-... 继续直到完成
-```
+- **clarifying**：需求不明确，向用户提问
+- **planning**：已理解需求，规划执行步骤
+- **executing**：执行中，调用 AgentTeam 做事
+- **completed**：完成，输出结果
 
 ## WebChat 限制
 
@@ -143,15 +123,15 @@ SymphonySession.handle("完全新手，没时间限制", answers={...})
 |------|------|------|
 | slash command (`/symphony`) | ❌ 不生效 | WebChat 不路由 slash command |
 | 自然语言触发 | ✅ 生效 | 通过 skill matching 识别需求 |
-| OpenClaw skill matching | ✅ 生效 | description + examples 匹配 |
+| OpenClaw skill matching | ✅ 生效 | description + triggers 匹配 |
 
 ## 测试
 
 ```bash
 cd ~/.openclaw/workspace/.agents/skills/compound-engineering/agent-symphony
-python agent_symphony_cli.py --test
+python test_symphony_integration.py
 ```
 
 ---
 
-_Last updated: 2026-05-17 v1.1.0_
+_Last updated: 2026-05-18 v2.0.0_
