@@ -1,118 +1,150 @@
 # Agent Symphony
 
-> Multi-skill interoperability for AI agents
+> Multi-skill collaborative workflow — the AI is the conductor, users just describe their needs
 
 ---
 
-## Overview
+## Core Concept
 
-Agent Symphony is a multi-skill interconnected Agent framework.
+**Symphony is a multi-skill collaborative workflow, not a standalone program.**
 
-**Core Idea**: 4 skills (thinking/memory/search/team) interoperate at the底层, like a symphony orchestra.
+After installation, the AI assistant automatically understands its role: acting as the conductor, coordinating thinking/memory/search/AgentTeam skills to complete complex tasks.
+
+Users don't need to understand what Symphony is — just describe their needs and the AI starts the workflow.
+
+---
+
+## Workflow
 
 ```
-User: "Help me analyze this project issue"
+User describes a need
     ↓
-thinking (Conductor)
-    ├──→ memory.store()    # Store context
-    ├──→ search.query()    # Search info
-    └──→ team.execute()    # Execute task
+thinking skill ← AI (conductor): ask, clarify, analyze
+    ↓
+memory skill ← store confirmed requirements/plans
+    ↓
+planning (plan stage) ← AI creates execution plan
+    ↓
+memory skill ← store the plan
+    ↓
+AgentTeam ← AI calls team skill to execute
 ```
+
+**Natural invocation:** When search is needed, AI naturally calls search skill; when memory is needed, AI calls memory skill.
+
+---
+
+## How It Starts
+
+| Trigger | Description |
+|---------|-------------|
+| **Passive** | User says "启动交响乐", "交响乐" → AI starts immediately |
+| **Active** | AI judges by task nature (needs multi-round clarification / multi-skill collaboration / planning) |
+
+If user says "交响乐是什么" just to ask, that won't trigger the workflow — the AI judges the true intent.
 
 ---
 
 ## Four Core Skills
 
-| Skill | Repo | Role | Core Function |
-|-------|------|------|---------------|
-| **thinking** | [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) | Conductor | Understand, ask, plan, reflect (integrated expert perspectives) |
-| **memory** | [AgentMemory](https://github.com/YintaTriss/AgentMemory) | Memory Center | Vector search, hybrid search, smart forgetting |
-| **search** | [AgentSearch](https://github.com/YintaTriss/AgentSearch) | Info Retrieval | Multi-engine search, result routing |
-| **team** | [AgentTeam](https://github.com/YintaTriss/AgentTeam) | Executor | Task execution, completion check |
+| Skill | Responsibility | Description |
+|-------|---------------|-------------|
+| **thinking** | Dialogue + Analysis | Lead requirement discussion, clarify, create plans |
+| **memory** | Memory Storage | Store requirements/plans for future reference |
+| **search** | Information Retrieval | Called naturally when needed |
+| **team** | Task Execution | Call AgentTeam to execute specific tasks |
 
 ---
 
-## Architecture
+## The AI's Role
+
+**I am the conductor.** No separate "conductor" role exists.
+
+- Judge when to start Symphony
+- Discuss and clarify requirements with user through thinking skill
+- Coordinate all skill invocations
+- Integrate results, respond to user
+- Call AgentTeam to execute plans
+
+---
+
+## State Machine
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Agent Symphony                           │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────┐                                            │
-│  │   thinking  │ ◄── Conductor                              │
-│  └──────┬──────┘                                            │
-│         │                                                   │
-│    ┌────┴────┬────────────┐                                 │
-│    ▼         ▼            ▼                                 │
-│ ┌──────┐ ┌──────┐    ┌──────┐                              │
-│ │memory│ │search│    │team  │                              │
-│ └──┬───┘ └──┬───┘    └──┬───┘                              │
-│    │        │           │                                  │
-│    ▼        ▼           ▼                                  │
-│ ┌──────────────────────────────────────┐                   │
-│ │        Shared Context                 │                  │
-│ │   • LLM Provider (Plug-in)            │                  │
-│ │   • Caller Tracking                  │                  │
-│ │   • Result Routing                   │                  │
-│ └──────────────────────────────────────┘                   │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+clarifying → planning → executing → completed
+```
+
+- **clarifying**: Requirements unclear, ask user questions
+- **planning**: Requirements understood, create execution plan
+- **executing**: Call AgentTeam to execute
+- **completed**: Done, output results
+
+---
+
+## Cross-Platform
+
+| Platform | Status |
+|----------|--------|
+| Windows | ✅ |
+| macOS | ✅ |
+| Linux | ✅ |
+
+Python 3.10+. Uses `subprocess`, `pathlib` — no platform-specific code.
+
+---
+
+## Installation
+
+```bash
+# 1. Clone the repo
+cd ~/.openclaw/workspace
+git clone https://github.com/YintaTriss/AgentSymphony
+
+# 2. Move to correct location
+mv AgentSymphony ~/.openclaw/workspace/.agents/skills/compound-engineering/agent-symphony
+
+# 3. Restart OpenClaw
+openclaw gateway restart
 ```
 
 ---
 
-## Three Key Features
-
-### 1. Plug-in LLM
-
-Skills auto-detect LLM config from environment variables:
+## Quick Start
 
 ```python
-# Auto-detect priority:
-# OPENAI_API_KEY → DASHSCOPE_API_KEY → MINIMAX_API_KEY → DEEPSEEK_API_KEY
+from agent_symphony_openclaw import SymphonySession
 
-# Skill gets LLM via SharedContext
-context = get_context()
-result = context.call_llm("User question...")
-embeddings = context.get_embeddings("text")
-```
+session = SymphonySession()
 
-**Works anywhere, with any LLM.**
+# Start
+result = session.handle("I want to build a quantitative trading system")
+print(result["response"])
+# → "Hello, I'm the conductor. Please tell me what you want to accomplish."
 
-### 2. Result Routing
-
-Search results are routed based on caller:
-
-| Caller | Output | Format |
-|--------|---------|--------|
-| User direct call | → User | Full format with meta |
-| thinking call | → thinking | Structured data |
-| team call | → team | Simplified data |
-
-### 3. Full Skill Interconnection
-
-```
-thinking ←→ memory
-thinking ←→ search
-thinking ←→ team
-team ←→ search
+# Continue
+result = session.handle("I'm a complete beginner, don't know where to start")
+print(result["response"])
+# → "What aspect would you most like to understand?"
 ```
 
 ---
 
-## Related Repos
+## Related Projects
 
-| Project | URL | Description |
-|---------|-----|-------------|
-| AgentSymphony | [GitHub](https://github.com/YintaTriss/AgentSymphony) | Main repo (skill symphony) |
-| AgentMemory | [GitHub](https://github.com/YintaTriss/AgentMemory) | Standalone memory skill |
-| AgentSearch | [GitHub](https://github.com/YintaTriss/AgentSearch) | Standalone search skill |
-| AgentTeam | [GitHub](https://github.com/YintaTriss/AgentTeam) | Multi-agent collaboration |
-| Agent-Superthinking | [GitHub](https://github.com/YintaTriss/Agent-Superthinking) | Deep thinking (thinking's expert perspectives) |
+- [AgentTeam](https://github.com/YintaTriss/AgentTeam) - Multi-agent collaboration framework
+- [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) - Super thinking capability (expert perspective analysis)
+- [AgentSymphony](https://github.com/YintaTriss/AgentSymphony) - This repo
 
 ---
 
-## License
+## Changelog
 
-MIT
+### v2.0 (2026-05-18)
+- **I am the conductor**: Removed fake "conductor" role, AI assistant directly acts as conductor
+- Updated workflow: thinking discuss → memory store → planning create plan → memory store → AgentTeam execute
+- Dual trigger: passive (user says "启动交响乐") + active (LLM judges task nature)
+- Cross-platform: Windows/macOS/Linux
+
+---
+
+_楚灵 ⚔️ 2026-05-18 v2.0_

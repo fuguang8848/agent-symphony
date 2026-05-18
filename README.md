@@ -1,194 +1,171 @@
 # Agent Symphony 技能交响乐
 
-> 多技能底层互通，1+1 > 2 的质变效果
+> 多技能协作工作流，让 AI 担任指挥，用户只管说需求
 
 [English](README_en.md) · 简体中文
 
 ---
 
-## 概述
+## 核心定位
 
-Agent Symphony（技能交响乐）是一个多技能互通的 Agent 框架。
+**交响乐是一个多技能协作工作流，不是独立程序。**
 
-**核心思想**：4 个技能（thinking/memory/search/team）底层互通，像交响乐团一样各司其职又协调一致。
+安装后，AI 助手（楚灵）自动理解自己的角色：担任指挥者，协调 thinking/memory/search/AgentTeam 技能完成复杂任务。
+
+用户不需要理解交响乐是什么——只需要说需求，AI 就会启动工作流。
+
+---
+
+## 工作流
 
 ```
-用户: "帮我分析这个项目的问题"
+用户描述需求
     ↓
-thinking (协调者/指挥家)
-    ├──→ memory.store()    # 存储上下文，学习用户偏好
-    ├──→ search.query()    # 搜索信息，实时获取知识
-    └──→ team.execute()    # 协调 AgentTeam 执行任务
+thinking 技能 ← AI助手（楚灵）主导：提问、澄清、分析
+    ↓
+memory 技能 ← 需求/计划明确后存入记忆
+    ↓
+planning（计划阶段）← AI助手制定执行计划
+    ↓
+memory 技能 ← 计划存入记忆
+    ↓
+AgentTeam ← AI助手调用 team 技能执行
 ```
+
+**自然调用：** 过程中需要搜索时，AI助手自然调用 search 技能；需要记忆时调用 memory 技能。
+
+---
+
+## 触发方式
+
+| 触发方式 | 说明 |
+|---------|------|
+| **被动触发** | 用户说"启动交响乐"、"交响乐" → AI立即启动 |
+| **主动判断** | AI根据任务性质判断是否启动（需要多轮澄清/多技能协作/规划执行） |
+
+用户说"交响乐是什么"只是询问，不会启动工作流。LLM会判断用户的真实意图。
 
 ---
 
 ## 四大核心技能
 
-| 技能 | 角色 | 核心功能 | LLM 接入 |
-|------|------|----------|----------|
-| **thinking** | 协调者（指挥家） | 理解需求、提问澄清、规划、用 LLM 生成执行计划 | ✅ 真实 LLM |
-| **memory** | 记忆中心 | 存储上下文、学习用户偏好、向量检索 | ✅ 真实 LLM |
-| **search** | 信息获取 | 搜索实时信息、补充知识 | ❌ 纯搜索 |
-| **team** | 执行中心 | 接收 plan，调用 AgentTeam 真实执行任务 | ❌ Pure bridge |
+| 技能 | 职责 | 说明 |
+|------|------|------|
+| **thinking** | 对话 + 分析 | 主导需求探讨、提问澄清、制定计划 |
+| **memory** | 记忆存储 | 需求/计划明确后存入，供后续参考 |
+| **search** | 信息获取 | 需要时自然调用，获取实时信息 |
+| **team** | 任务执行 | 调用 AgentTeam 执行具体任务 |
 
 ---
 
-## 交响乐流程
+## AI 助手（楚灵）的角色
 
-### 4 阶段状态机
+**我就是指挥者。** 没有额外的"指挥家"角色。
 
-```
-clarifying  →  理解需求，评估明确度
-    ↓
-planning    →  LLM 生成执行计划，专家视角分析
-              thinking 调用 LLMRouter 选择专家（87个）
-              并行驱动各专家视角，给出建议
-    ↓
-executing   →  thinking 申请技能执行
-              skill_requests = [
-                  {skill: "memory", action: "store", ...},
-                  {skill: "search", action: "search", ...},
-                  {skill: "team", action: "execute_task", plan: [...]}
-              ]
-    ↓
-completed   →  汇总结果，LLM 反思，done=True
-```
-
-### 技能调用顺序
-
-1. **thinking** 收到需求 → 用 LLM 分析 → 问用户确认
-2. 用户确认"好" → thinking 进入 executing
-3. thinking 用 LLM 生成 plan → 申请 memory + search + team
-4. **team** 收到 plan → 调用 AgentTeam (clawteam CLI)
-5. **AgentTeam** spawn 子 agent → 通过 OpenClaw 使用 LLM
-6. thinking 收到结果 → LLM 汇总 → 进入 completed
+- 判断何时启动交响乐
+- 通过 thinking 技能与用户对话澄清需求
+- 协调所有技能的调用时机
+- 整合结果，回应用户
+- 调用 AgentTeam 执行计划
 
 ---
 
-##thinking 技能详解
+## 状态机
 
-thinking 是交响乐的核心协调者（指挥家）。
+```
+clarifying（澄清）→ planning（计划）→ executing（执行）→ completed（完成）
+```
 
-**核心能力：**
-- 真实调用 LLM（MiniMax 等）进行需求理解和规划
-- LLMRouter 智能选择专家（87个专家：Python 类 + SKILL.md）
-- Jury 并行驱动多专家视角分析
-- 生成结构化的 skill_requests
-
-**专家池：**
-- Python 类定义的专家（18个）
-- SKILL.md 声明的专家（69个）
-- 包括：jobs、elon、turing、naval、darwin、乔布斯、毛泽东等
+- **clarifying**：需求不明确，向用户提问
+- **planning**：已理解需求，制定执行计划
+- **executing**：调用 AgentTeam 执行
+- **completed**：完成，输出结果
 
 ---
 
-## team 技能详解
+## 跨平台支持
 
-team 是纯桥接层，不做 LLM 分析。
+| 平台 | 状态 |
+|------|------|
+| Windows | ✅ |
+| macOS | ✅ |
+| Linux | ✅ |
 
-**职责：**
-- 接收 thinking 传来的 plan
-- 调用 AgentTeam (clawteam CLI) 执行每个步骤
-- 所有 LLM 分析由 AgentTeam 子 agent 完成
+Python 3.10+，依赖 `subprocess`、`pathlib`，无平台特定代码。
 
-**执行流程：**
-```
-team._execute_task(plan)
-    ↓
-for each step in plan:
-    clawteam run <action> --key1 value1 ...
-    ↓
-AgentTeam spawn 子 agent（通过 OpenClaw 使用 LLM）
+---
+
+## 安装
+
+```bash
+# 1. 克隆仓库
+cd ~/.openclaw/workspace
+git clone https://github.com/YintaTriss/AgentSymphony
+
+# 2. 移动到正确位置
+# 根据你的 OpenClaw skills 路径配置，选择以下之一：
+mv AgentSymphony ~/.openclaw/workspace/.agents/skills/compound-engineering/agent-symphony
+
+# 3. 重启 OpenClaw
+openclaw gateway restart
 ```
 
 ---
 
-## memory 技能详解
-
-memory 是智能记忆系统。
-
-**核心功能：**
-- 插入式 LLM：使用 SharedContext 的 LLMProvider
-- 记忆存储：上下文、偏好、模式
-- 向量检索：语义相似度搜索
-- LLM 增强：自动从交互中学习用户偏好
-
----
-
-## search 技能
-
-search 负责信息获取。
-
-**核心功能：**
-- 实时搜索：web_search 工具
-- 不依赖 LLM（纯搜索）
-- 为 thinking 和 team 提供实时信息
-
----
-
-## 架构图
-
-```
-                    用户
-                      │
-                      ▼
-               ┌─────────────┐
-               │  thinking   │ ◄──── 真实 LLM (MiniMax)
-               │  (协调者)    │
-               └──────┬──────┘
-                      │
-          ┌───────────┼───────────┐
-          │           │           │
-          ▼           ▼           ▼
-    ┌─────────┐ ┌─────────┐ ┌─────────┐
-    │ memory  │ │ search  │ │  team   │
-    │(记忆)   │ │(搜索)   │ │(执行)   │
-    └────┬────┘ └────┬────┘ └────┬────┘
-         │           │           │
-         │           │           ▼
-         │           │    ┌─────────────┐
-         │           │    │  AgentTeam  │
-         │           │    │ (clawteam)  │
-         │           │    └──────┬──────┘
-         │           │           │
-         │           │           ▼
-         │           │    ┌─────────────┐
-         │           │    │ 子 agent    │ ◄──── OpenClaw LLM
-         │           │    └─────────────┘
-         ▼           ▼
-      存储到 L3   返回搜索结果
-      向量库
-```
-
----
-
-## 接入 OpenClaw
-
-Agent Symphony 作为 OpenClaw 技能接入：
+## 快速开始
 
 ```python
 from agent_symphony_openclaw import SymphonySession
 
-s = SymphonySession()
+session = SymphonySession()
 
-# 第1轮：启动
-r = s.handle("")
+# 启动
+result = session.handle("我想做量化交易系统")
+print(result["response"])
+# → "你好，我是指挥。请告诉我你想要完成的事情吧。"
 
-# 第2轮：提需求
-r = s.handle("我想做一个chrome扩展程序，用来一键翻译网页")
+# 继续对话
+result = session.handle("完全新手，不知道怎么入手")
+print(result["response"])
+# → "你最想了解哪个方面？"
+```
 
-# 第3轮：确认执行
-r = s.handle("好", {})
-# r['skill_requests'] 包含 memory + search + team
+---
 
-# 第4轮：执行技能
-for req in r['skill_requests']:
-    result = s.execute_skill(req["skill"], req["action"], req["params"])
-    s.notify_skill_result(req["skill"], result)
+## 工作流示例
 
-# 第5轮：结果回调
-r = s.handle("继续", {}, skill_results=all_results)
+```
+用户: "我想做量化交易"
+    ↓
+thinking: "你最想了解哪个方面？"
+    ↓
+用户: "我想了解怎么入门"
+    ↓
+thinking: "好的，根据你的情况，我来制定一个学习计划..."
+    ↓
+memory: 存储学习计划
+    ↓
+planning: 生成执行计划
+    ↓
+AgentTeam: 开始执行学习任务
+```
+
+---
+
+## 架构
+
+```
+用户消息（自然语言）
+    ↓
+OpenClaw 消息处理器
+    ↓
+Skill Matching（检测到交响乐需求）
+    ↓
+SymphonySession（AI助手楚灵在内部协调）
+    ↓
+thinking / memory / search / AgentTeam 技能
+    ↓
+返回 response 给用户
 ```
 
 ---
@@ -203,19 +180,21 @@ r = s.handle("继续", {}, skill_results=all_results)
 
 ## 版本历史
 
+### v2.0 (2026-05-18)
+- **我就是指挥者**：删除伪需求"指挥家"角色，AI助手（楚灵）直接担任指挥
+- 更新工作流描述：thinking探讨 → memory存储 → planning制定计划 → memory存储 → AgentTeam执行
+- 双重触发机制：被动（用户说启动）+ 主动（LLM判断任务性质）
+- 跨平台兼容：Windows/macOS/Linux
+
 ### v0.8 (2026-05-18)
 - thinking 接入真实 LLM（MiniMax）
 - thinking 在 planning 阶段用 LLM 生成执行计划
-- thinking 申请 team skill 执行（plan 包含 team.execute_task）
-- team skill 还原为 pure bridge，调用 AgentTeam
-- memory 已有 LLM 增强分析
 - 完整流程：clarifying → planning → executing → completed
 
 ### v0.7 (2026-05-17)
 - 交响乐状态机完善
-- done 状态正确转换
 - 初始版本
 
 ---
 
-_楚灵 ⚔️ 2026-05-18_
+_楚灵 ⚔️ 2026-05-18 v2.0_
