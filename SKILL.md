@@ -1,6 +1,6 @@
 ---
 name: agent-symphony-integration
-version: 2.0.0
+version: 2.1.0
 family: compound-engineering
 description: "AgentSymphony 交响乐技能。提供多轮对话式任务编排，自动协调 thinking/memory/search/team 技能。适用于复杂任务的需求澄清、多技能协作和规划执行。"
 argument-hint: "[需求描述]"
@@ -11,6 +11,26 @@ triggers:
 ---
 
 # AgentSymphony OpenClaw 集成
+
+## 核心原则（必须遵循）
+
+**工作流的每个节点都必须调用 thinking 技能。**
+
+交响乐是一个严格的工作流，不是自由发挥的对话。AI 助手不能自己判断如何回应——每一条用户消息都必须经过 thinking 技能分析，thinking 返回结果后才能回应用户。
+
+```
+用户消息
+    ↓
+[必须] thinking 技能分析 ← AI助手不得跳过
+    ↓
+thinking 返回结构化结果
+    ↓
+AI助手整合结果，回应用户
+```
+
+**违反这条原则就不是交响乐。**
+
+---
 
 ## AI 助手路由说明（重要）
 
@@ -38,40 +58,36 @@ triggers:
 - 是简单的知识问答或直接操作
 - 只需要单次回答，不需要多轮对话
 
-**AI 助手在交响乐中的角色：**
-- 作为协调者，整合 thinking/memory/search/team 的结果
-- 和用户直接对话，辩证分析需求
-- 最终把执行计划交给 team leader
+**AI 助手在交响乐中的职责：**
+- 判断何时启动交响乐
+- **每一句话都必须调用 thinking 技能分析**
+- 通过 thinking 技能的返回结果与用户对话
+- 协调所有技能的调用时机
+- 整合 thinking 结果，回应用户
 
 ---
 
-## 概述
+## 工作流（强制执行）
 
-交响乐是一个**多技能协作工作流**，不是独立程序。AI 助手就是这个工作流的**指挥者**，没有额外的"指挥家"角色。
-
-**工作流：**
 ```
 用户描述需求
     ↓
-thinking 技能 ← AI助手（指挥者）主导：提问、澄清、分析
+[必须] thinking 技能 ← 分析用户需求、提问澄清
     ↓
 memory 技能 ← 需求/计划明确后存入记忆
     ↓
-planning（计划阶段）← AI助手制定执行计划
+[必须] thinking 技能 ← 制定执行计划
     ↓
 memory 技能 ← 计划存入记忆
     ↓
-AgentTeam ← AI助手调用 team 技能执行
+[必须] thinking 技能 ← 协调 AgentTeam 执行
+    ↓
+AgentTeam ← team 技能调用执行
+    ↓
+[必须] thinking 技能 ← 反思结果，评估是否达成目标
 ```
 
-**自然调用：** 过程中需要搜索时，AI助手自然调用 search 技能；需要记忆时调用 memory 技能。不需要手动管理。
-
-**AI 助手的职责：**
-- 判断何时启动交响乐
-- 通过 thinking 技能与用户对话澄清需求
-- 协调所有技能的调用时机
-- 整合结果，回应用户
-- 调用 AgentTeam 执行计划
+**每个箭头都代表一次 thinking 技能调用。AI 助手不能跳过 thinking 直接回应用户。**
 
 ---
 
@@ -81,10 +97,10 @@ AgentTeam ← AI助手调用 team 技能执行
 clarifying（澄清）→ planning（计划）→ executing（执行）→ completed（完成）
 ```
 
-- **clarifying**：需求不明确，向用户提问
-- **planning**：已理解需求，规划执行步骤
-- **executing**：执行中，处理技能申请
-- **completed**：完成，输出结果
+- **clarifying**：thinking 分析需求，向用户提问澄清
+- **planning**：thinking 生成执行计划
+- **executing**：thinking 协调 team/memory/search 技能执行
+- **completed**：thinking 反思总结，输出结果
 
 ## API
 
@@ -94,41 +110,33 @@ clarifying（澄清）→ planning（计划）→ executing（执行）→ compl
 from agent_symphony_openclaw import SymphonySession
 
 session = SymphonySession()
-result = session.handle("我想做一个量化交易系统")
+
+# 启动
+result = session.handle("启动交响乐")
+
+# 每一句话都必须通过 handle 传递给 thinking 技能
+result = session.handle("我想做量化交易")
 
 # result:
 {
-    "response": "* 根据你的需求...",      # 面向用户的回复
-    "skill_requests": [],                   # 技能申请列表
-    "state": "planning",                   # 当前状态
-    "done": False,                         # 是否完成
-    "questions": [],                       # 澄清问题
+    "response": "* 根据你的需求...",      # thinking 分析后的回复
+    "skill_requests": [],                   # 技能申请
+    "state": "clarifying",                # 当前状态
+    "done": False,                        # 是否完成
+    "questions": [],                       # thinking 生成的问题
     "success": True
 }
 ```
 
-### 处理技能申请（可选）
-
-```python
-for req in result.get("skill_requests", []):
-    skill = req["skill"]           # "thinking" | "memory" | "search" | "team"
-    action = req["action"]         # 技能动作
-    params = req["params"]         # 动作参数
-
-    # 执行技能（通过 OpenClaw 的 tools 或直接调用）
-    skill_result = execute_skill(skill, action, params)
-
-    # 回调结果
-    session.notify_skill_result(skill, skill_result)
-```
+---
 
 ## 注意事项
 
-1. **LLM 智力和 OpenClaw 共享** - 技能不携带 LLM，通过 OpenClaw 上下文调用
-2. **skill_requests 可选** - 不处理技能申请时，交响乐仍可工作（降级为纯对话模式）
+1. **thinking 技能是核心** - 每条用户消息都必须经过 thinking 分析
+2. **AI 助手不能跳过 thinking** - 直接回应用户等于破坏工作流
 3. **会话隔离** - 每个用户有独立的 SymphonySession
 4. **WebChat 限制** - slash command 在 WebChat 不触发技能，需通过自然语言触发
 
 ---
 
-_AgentSymphony OpenClaw Integration v2.0.0_
+_AgentSymphony OpenClaw Integration v2.1.0_
