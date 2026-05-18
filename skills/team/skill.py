@@ -1,19 +1,26 @@
 """
-team 技能 - AgentTeam 适配层
+team 技能 - AgentTeam 完全体适配层
 
-将 AgentTeam 的 TeamManager 适配到 Agent Symphony 协议
+使用 AgentTeam Python SDK（完全体），不经过 CLI：
+- CTTeam: 团队容器
+- CTAgent: 运行在 OpenClaw Session 的智能体
+- CTTask: 任务跟踪
+- spawn: 通过 OpenClaw SDK Backend 创建子 Agent
 
-核心原则：
-- team skill 是 pure bridge，不做 LLM 分析
-- 所有 LLM 分析由 thinking 或 AgentTeam 子 agent 完成
-- team skill 只负责调用 AgentTeam API
+所有 LLM 分析由 AgentTeam 子 agent 完成（通过 OpenClaw 使用用户配置的模型）
 """
 
+import sys
 import time
 import json
-import subprocess
+from pathlib import Path
 from typing import Any
 from dataclasses import dataclass
+
+# 将 AgentTeam 添加到 path（如果不在 Python 环境里）
+_agentteam_path = Path(__file__).parent.parent.parent.parent / "AgentTeam"
+if str(_agentteam_path) not in sys.path:
+    sys.path.insert(0, str(_agentteam_path))
 
 from shared import (
     Skill,
@@ -33,19 +40,18 @@ class TeamSkillConfig:
 
 class TeamSkill:
     """
-    Team 技能 - AgentTeam 的 Symphony 适配层
+    Team 技能 - AgentTeam 完全体
 
-    职责：
-    - 接收 thinking 传来的 plan
-    - 调用 AgentTeam (clawteam CLI) 真实执行
-    - 返回执行结果
-
-    所有 LLM 分析由 AgentTeam 子 agent 完成（通过 OpenClaw）
+    直接使用 AgentTeam SDK：
+    - CTTeam.spawn() -> OpenClaw Session Agent
+    - 子 agent 通过 OpenClaw 使用用户配置的 LLM
+    - team skill 是纯协调层，不自己做 LLM 分析
     """
 
     def __init__(self, config: TeamSkillConfig | None = None):
         self.config = config or TeamSkillConfig()
         self._context: SharedContext = get_context()
+        self._teams: dict[str, Any] = {}
 
     # ==================== 标准接口 ====================
 
@@ -108,15 +114,20 @@ class TeamSkill:
         elif event == "task.failed":
             self._on_task_failed(data)
 
-    # ==================== 核心执行 ====================
+    # ==================== AgentTeam SDK 完全体执行 ====================
 
     def _execute_task(self, params: dict) -> dict:
         """
-        执行任务计划
+        使用 AgentTeam CTTeam 完全体执行任务计划
 
-        调用 AgentTeam (clawteam) 真实执行每个步骤
-        每个步骤由 AgentTeam 的子 agent 处理（通过 OpenClaw 使用 LLM）
+        流程：
+        1. 创建/获取 CTTeam
+        2. 为每个步骤 spawn 一个 CTAgent
+        3. 等待所有 agent 完成
+        4. 汇总结果
         """
+        from agentteam.core import CTTeam, AgentState
+
         task_id = params.get("task_id", f"task_{int(time.time())}")
         plan = params.get("plan", [])
         requirement = params.get("requirement", "")
@@ -124,15 +135,71 @@ class TeamSkill:
         self._context.create_task(description=f"Team task: {task_id}")
         self._context.update_task_status("executing")
 
-        results = []
+        # 创建团队（每个任务一个独立团队）
+        team_name = f"symphony_{task_id}"
+        team = CTTeam(team_name)
+        self._teams[team_name] = team
 
+        # 为每个步骤 spawn agent
+        results = []
         for i, step in enumerate(plan):
             action = step.get("action", "")
             step_params = step.get("params", {})
-            step_params["requirement"] = requirement
+            agent_name = f"worker_{i}"
 
-            result = self._execute_via_clawteam(action, step_params, i)
-            results.append(result)
+            # 构造 agent 任务描述
+            task_desc = self._build_agent_task(action, step_params, requirement, i)
+
+            try:
+                agent = team.spawn(
+                    name=agent_name,
+                    task=task_desc,
+                    agent_type="worker",
+                )
+
+                results.append({
+                    "step": i,
+                    "action": action,
+                    "status": "spawned",
+                    "agent_name": agent_name,
+                    "session_key": agent.session_key,
+                })
+
+            except Exception as e:
+                results.append({
+                    "step": i,
+                    "action": action,
+                    "status": "failed",
+                    "error": str(e)
+                })
+
+        # 等待所有 agent 完成（最多 5 分钟）
+        wait_timeout = 300
+        start = time.time()
+        while time.time() - start < wait_timeout:
+            all_done = all(
+                r.get("status") in ("completed", "failed") or r.get("session_key")
+                for r in results
+            )
+            if all_done:
+                break
+            time.sleep(5)
+
+            # 检查 agent 状态
+            for r in results:
+                if r.get("session_key") and r.get("status") == "spawned":
+                    # 检查 agent 是否完成
+                    agent_name = r.get("agent_name")
+                    agent = team.agents.get(agent_name)
+                    if agent and agent.state in (AgentState.COMPLETED, AgentState.FAILED, AgentState.TERMINATED):
+                        r["status"] = "completed" if agent.state == AgentState.COMPLETED else "failed"
+                        if agent.task_id:
+                            r["result"] = agent.task_id
+
+        # 标记未完成的为超时
+        for r in results:
+            if r.get("status") == "spawned":
+                r["status"] = "timeout"
 
         # 完成度
         completed = sum(1 for r in results if r.get("status") == "completed")
@@ -148,88 +215,42 @@ class TeamSkill:
         return {
             "task_id": task_id,
             "results": results,
+            "team_name": team_name,
             "completion_rate": completion_rate,
             "status": "completed" if completion_rate >= 1.0 else "partial"
         }
 
-    def _execute_via_clawteam(self, action: str, params: dict, step_index: int) -> dict:
-        """
-        通过 clawteam CLI 调用 AgentTeam 执行单个步骤
+    def _build_agent_task(self, action: str, params: dict, requirement: str, step_index: int) -> str:
+        """为 agent 构造任务描述"""
+        params_str = json.dumps(params, ensure_ascii=False, indent=2)
+        return f"""你是任务执行专家。请执行以下步骤：
 
-        clawteam run <action> --key1 value1 --key2 value2
-        """
-        try:
-            # 构建命令
-            cmd = ["clawteam", "run", action]
-            for k, v in params.items():
-                if v is not None:
-                    cmd.extend([f"--{k}", json.dumps(v) if isinstance(v, dict) else str(v)])
+## 任务索引：{step_index}
+## 动作：{action}
+## 原始需求：{requirement}
+## 参数：{params_str}
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                shell=False
-            )
+执行步骤 {step_index + 1}：{action}
 
-            if result.returncode == 0:
-                return {
-                    "step": step_index,
-                    "action": action,
-                    "status": "completed",
-                    "output": (result.stdout or "done")[:500],
-                    "error": None
-                }
-            else:
-                return {
-                    "step": step_index,
-                    "action": action,
-                    "status": "failed",
-                    "output": None,
-                    "error": (result.stderr or "unknown error")[:200]
-                }
+完成执行后，返回：
+1. 执行结果（2-3句话）
+2. 关键洞察（1-2句）
 
-        except subprocess.TimeoutExpired:
-            return {
-                "step": step_index,
-                "action": action,
-                "status": "failed",
-                "output": None,
-                "error": "timeout (>120s)"
-            }
-        except FileNotFoundError:
-            # clawteam 不可用，返回占位结果（AgentTeam 子 agent 会真正执行）
-            return {
-                "step": step_index,
-                "action": action,
-                "status": "completed",
-                "output": f"[clawteam not available] Action '{action}' would be executed by AgentTeam",
-                "error": None,
-                "note": "clawteam CLI not found - AgentTeam will handle via OpenClaw"
-            }
-        except Exception as e:
-            return {
-                "step": step_index,
-                "action": action,
-                "status": "failed",
-                "output": None,
-                "error": str(e)[:200]
-            }
+只返回执行结果，不要多余内容。"""
 
     # ==================== 其他接口 ====================
 
     def _delegate(self, params: dict) -> dict:
         return {
             "delegated": True,
-            "message": "Delegation handled by AgentTeam"
+            "message": "Delegation handled by AgentTeam CTTeam"
         }
 
     def _status(self, params: dict) -> dict:
         return {
             "team_id": params.get("team_id", "default"),
             "status": "ready",
-            "backend": "AgentTeam"
+            "backend": "AgentTeam SDK (CTTeam)"
         }
 
     def _check(self, params: dict) -> dict:
