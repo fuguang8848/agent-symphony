@@ -966,13 +966,18 @@ class ThinkingSkill:
         
         if any(w in msg_lower for w in ["好", "行", "执行", "对", "没错"]):
             self._context.set("symphony_phase", "executing")
+
+            # 用 LLM 生成执行计划
+            plan = self._generate_execution_plan()
+
             return {
                 "response": "* 明白，开始协调各方成员！\n\n我将调用 memory 记录你的需求，search 搜索相关信息，team 执行具体任务。\n\n稍等，正在启动...",
                 "state": "executing",
                 "done": False,
                 "skill_requests": [
                     {"skill": "memory", "action": "store", "params": {"type": "context", "content": self._context.get("requirement", "")}},
-                    {"skill": "search", "action": "search", "params": {"query": self._context.get("requirement", "")}}
+                    {"skill": "search", "action": "search", "params": {"query": self._context.get("requirement", "")}},
+                    {"skill": "team", "action": "execute_task", "params": {"plan": plan}}
                 ]
             }
         
@@ -1080,6 +1085,57 @@ class ThinkingSkill:
             "state": "completed",
             "done": True
         }
+
+    def _generate_execution_plan(self) -> list:
+        """
+        用 LLM 将需求分解为可执行的任务步骤
+        """
+        requirement = self._context.get("requirement", "")
+        user_answers = self._context.get("user_answers", {})
+
+        context_lines = [f"需求: {requirement}"]
+        for k, v in user_answers.items():
+            context_lines.append(f"{k}: {v}")
+        context_str = "\n".join(context_lines)
+
+        prompt = f"""用户需求：
+{context_str}
+
+你是一个任务规划专家。根据用户需求，分解为 3-7 个具体的可执行步骤。
+
+要求：
+- 每个步骤要具体可执行
+- 步骤之间有明确的依赖关系（按顺序执行）
+- 每个步骤的 action 要是动词短语（如：调研竞品、设计架构、写代码、测试）
+- params 包含执行该步骤需要的关键信息
+
+返回 JSON 格式：
+{{
+  "plan": [
+    {{"action": "步骤动作名", "params": {{"参数键": "参数值"}}}},
+    ...
+  ]
+}}
+
+只返回 JSON，不要其他内容。"""
+
+        try:
+            response = self._context.call_llm(prompt)
+            if "[LLM not available" in response or "[LLM Error" in response:
+                return [{"action": "理解需求", "params": {"requirement": requirement}}]
+
+            import json as _json
+            start = response.find("{")
+            end = response.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                data = _json.loads(response[start:end+1])
+                plan = data.get("plan", [])
+                if plan:
+                    return plan
+        except Exception:
+            pass
+
+        return [{"action": "理解需求", "params": {"requirement": requirement}}]
 
     def _process_skill_results(self, results: dict):
         """

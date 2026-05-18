@@ -1,156 +1,221 @@
 # Agent Symphony 技能交响乐
 
-> 多技能协作框架，通过「指挥家 + 技能团」模式完成复杂任务
+> 多技能底层互通，1+1 > 2 的质变效果
+
+[English](README_en.md) · 简体中文
 
 ---
 
-## 核心架构
+## 概述
+
+Agent Symphony（技能交响乐）是一个多技能互通的 Agent 框架。
+
+**核心思想**：4 个技能（thinking/memory/search/team）底层互通，像交响乐团一样各司其职又协调一致。
 
 ```
-用户（自然语言）
+用户: "帮我分析这个项目的问题"
     ↓
-SymphonySession（指挥家）
+thinking (协调者/指挥家)
+    ├──→ memory.store()    # 存储上下文，学习用户偏好
+    ├──→ search.query()    # 搜索信息，实时获取知识
+    └──→ team.execute()    # 协调 AgentTeam 执行任务
+```
+
+---
+
+## 四大核心技能
+
+| 技能 | 角色 | 核心功能 | LLM 接入 |
+|------|------|----------|----------|
+| **thinking** | 协调者（指挥家） | 理解需求、提问澄清、规划、用 LLM 生成执行计划 | ✅ 真实 LLM |
+| **memory** | 记忆中心 | 存储上下文、学习用户偏好、向量检索 | ✅ 真实 LLM |
+| **search** | 信息获取 | 搜索实时信息、补充知识 | ❌ 纯搜索 |
+| **team** | 执行中心 | 接收 plan，调用 AgentTeam 真实执行任务 | ❌ Pure bridge |
+
+---
+
+## 交响乐流程
+
+### 4 阶段状态机
+
+```
+clarifying  →  理解需求，评估明确度
     ↓
-thinking（协调者，真实调用 LLM）
-    ├── LLMRouter → 从 87 个专家中选择最相关的（ExtendedRegistry）
-    ├── Jury（陪审团）→ 并行收集各专家视角分析
-    └── 状态机：clarifying → planning → executing → completed
-         ↓
-    skill_requests（memory / search / team）
+planning    →  LLM 生成执行计划，专家视角分析
+              thinking 调用 LLMRouter 选择专家（87个）
+              并行驱动各专家视角，给出建议
+    ↓
+executing   →  thinking 申请技能执行
+              skill_requests = [
+                  {skill: "memory", action: "store", ...},
+                  {skill: "search", action: "search", ...},
+                  {skill: "team", action: "execute_task", plan: [...]}
+              ]
+    ↓
+completed   →  汇总结果，LLM 反思，done=True
 ```
 
-### 四大技能
+### 技能调用顺序
 
-| 技能 | 角色 | 何时调用 |
-|------|------|----------|
-| **thinking** | 协调者，真实调用 LLM 与用户对话 | 始终 |
-| **memory** | 记忆中心，持续学习用户偏好和上下文 | 用户确认执行后，记录需求/偏好 |
-| **search** | 信息获取，搜索相关信息辅助决策 | planning 阶段需要信息时 |
-| **team** | 执行者，通过 ClawTeam 执行具体任务 | 用户确认后，执行 plan |
-
-### thinking 技能的工作方式
-
-thinking 是核心，它**真实调用 LLM**（通过 SharedContext 的 LLMProvider），不是规则匹配：
-
-1. **clarifying 阶段**：LLM 生成澄清问题，理解用户需求
-2. **planning 阶段**：
-   - LLMRouter 调用真实 LLM，从 87 个专家（Python 内置 + SKILL.md 发现）中选择最相关的几个
-   - Jury 并行驱动各专家视角分析（乔布斯视角、元认知、风险视角…）
-   - LLM 综合输出结构化分析
-   - 向用户确认计划
-3. **executing 阶段**：生成 skill_requests，调用 memory/search/team
-4. **completed 阶段**：汇总结果，问用户是否需要继续
+1. **thinking** 收到需求 → 用 LLM 分析 → 问用户确认
+2. 用户确认"好" → thinking 进入 executing
+3. thinking 用 LLM 生成 plan → 申请 memory + search + team
+4. **team** 收到 plan → 调用 AgentTeam (clawteam CLI)
+5. **AgentTeam** spawn 子 agent → 通过 OpenClaw 使用 LLM
+6. thinking 收到结果 → LLM 汇总 → 进入 completed
 
 ---
 
-## 工作流程详解
+##thinking 技能详解
 
-```
-用户: "我想做一个chrome扩展"
+thinking 是交响乐的核心协调者（指挥家）。
 
-[1] clarifying
-    thinking 真实调用 LLM，问："你打算做什么样的扩展？面向谁？"
+**核心能力：**
+- 真实调用 LLM（MiniMax 等）进行需求理解和规划
+- LLMRouter 智能选择专家（87个专家：Python 类 + SKILL.md）
+- Jury 并行驱动多专家视角分析
+- 生成结构化的 skill_requests
 
-[2] planning
-    LLMRouter 调用 MiniMax LLM，从 87 专家选出 7 个：
-      ["jobs_perspective", "elon_perspective", "risk_detail", ...]
-    Jury 并行分析：
-      - 乔布斯问：这是 amazing 还是 shit？
-      - Elon 问：能不能 10 倍好？
-      - 风险视角问：有哪些隐患？
-    LLM 综合输出，向用户确认："请告诉我可以开始执行吗？"
-
-[3] user confirms ("好")
-    → memory.store() 记录需求
-    → search.search() 搜索相关信息
-    （team 待集成）
-
-[4] 技能结果回调 thinking
-    → "completed, done=True"
-
-[5] 用户可继续新需求或结束
-```
+**专家池：**
+- Python 类定义的专家（18个）
+- SKILL.md 声明的专家（69个）
+- 包括：jobs、elon、turing、naval、darwin、乔布斯、毛泽东等
 
 ---
 
-## LLM 集成（关键）
+## team 技能详解
 
-thinking 技能的 LLM 智力来自 **SharedContext → LLMProvider**，自动从 OpenClaw 配置读取：
+team 是纯桥接层，不做 LLM 分析。
 
-- minimax → Anthropic Messages API
-- deepseek/openai → OpenAI Chat Completions API
-- 零配置，技能不携带 API Key
+**职责：**
+- 接收 thinking 传来的 plan
+- 调用 AgentTeam (clawteam CLI) 执行每个步骤
+- 所有 LLM 分析由 AgentTeam 子 agent 完成
 
-LLMRouter 的专家选择流程：
-1. 收集所有启用的专家（Python 内置 + SKILL.md 发现）
-2. 构造 prompt，包含专家列表
-3. 调用真实 LLM（MiniMax 等）
-4. 解析 JSON 响应，提取选中的专家 ID
-5. 验证 ID 有效性，返回 RoutingResult
-
----
-
-## 目录结构
-
+**执行流程：**
 ```
-AgentSymphony/
-├── agent_symphony_openclaw.py   # OpenClaw 集成入口（SymphonySession）
-├── agent_symphony_cli.py        # CLI 入口
-├── shared/                      # 共享模块
-│   ├── context.py               # SharedContext + LLMProvider（插入式 LLM）
-│   └── registry.py              # 技能注册表
-├── skills/
-│   ├── thinking/                # 协调者（真实调用 LLM）
-│   │   └── skill.py             # 状态机 + Jury + LLMRouter 集成
-│   ├── memory/                  # 记忆技能
-│   ├── search/                  # 搜索技能
-│   └── team/                    # 执行技能（ClawTeam）
-└── tests/
-    ├── test_dialog.py           # thinking 技能对话测试
-    ├── test_symphony_full.py    # 完整流程测试
-    └── test_openclaw.py         # OpenClaw 集成测试
+team._execute_task(plan)
+    ↓
+for each step in plan:
+    clawteam run <action> --key1 value1 ...
+    ↓
+AgentTeam spawn 子 agent（通过 OpenClaw 使用 LLM）
 ```
 
 ---
 
-## 快速测试
+## memory 技能详解
 
-```bash
-cd AgentSymphony
-pip install anthropic  # 必须（LLM 调用）
+memory 是智能记忆系统。
 
-# 完整流程测试
-python test_symphony_full.py
+**核心功能：**
+- 插入式 LLM：使用 SharedContext 的 LLMProvider
+- 记忆存储：上下文、偏好、模式
+- 向量检索：语义相似度搜索
+- LLM 增强：自动从交互中学习用户偏好
+
+---
+
+## search 技能
+
+search 负责信息获取。
+
+**核心功能：**
+- 实时搜索：web_search 工具
+- 不依赖 LLM（纯搜索）
+- 为 thinking 和 team 提供实时信息
+
+---
+
+## 架构图
+
+```
+                    用户
+                      │
+                      ▼
+               ┌─────────────┐
+               │  thinking   │ ◄──── 真实 LLM (MiniMax)
+               │  (协调者)    │
+               └──────┬──────┘
+                      │
+          ┌───────────┼───────────┐
+          │           │           │
+          ▼           ▼           ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │ memory  │ │ search  │ │  team   │
+    │(记忆)   │ │(搜索)   │ │(执行)   │
+    └────┬────┘ └────┬────┘ └────┬────┘
+         │           │           │
+         │           │           ▼
+         │           │    ┌─────────────┐
+         │           │    │  AgentTeam  │
+         │           │    │ (clawteam)  │
+         │           │    └──────┬──────┘
+         │           │           │
+         │           │           ▼
+         │           │    ┌─────────────┐
+         │           │    │ 子 agent    │ ◄──── OpenClaw LLM
+         │           │    └─────────────┘
+         ▼           ▼
+      存储到 L3   返回搜索结果
+      向量库
+```
+
+---
+
+## 接入 OpenClaw
+
+Agent Symphony 作为 OpenClaw 技能接入：
+
+```python
+from agent_symphony_openclaw import SymphonySession
+
+s = SymphonySession()
+
+# 第1轮：启动
+r = s.handle("")
+
+# 第2轮：提需求
+r = s.handle("我想做一个chrome扩展程序，用来一键翻译网页")
+
+# 第3轮：确认执行
+r = s.handle("好", {})
+# r['skill_requests'] 包含 memory + search + team
+
+# 第4轮：执行技能
+for req in r['skill_requests']:
+    result = s.execute_skill(req["skill"], req["action"], req["params"])
+    s.notify_skill_result(req["skill"], result)
+
+# 第5轮：结果回调
+r = s.handle("继续", {}, skill_results=all_results)
 ```
 
 ---
 
 ## 相关项目
 
-| 项目 | 说明 |
-|------|------|
-| [AgentSymphony](https://github.com/YintaTriss/AgentSymphony) | 交响乐主仓库 |
-| [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) | thinking 技能的专家视角框架（LLMRouter + ExtendedRegistry + Jury） |
-| [AgentMemory](https://github.com/YintaTriss/AgentMemory) | 记忆技能 |
-| [AgentSearch](https://github.com/YintaTriss/AgentSearch) | 搜索技能 |
-| [AgentTeam](https://github.com/YintaTriss/AgentTeam) | 执行技能（ClawTeam 多智能体框架） |
+- [AgentTeam](https://github.com/YintaTriss/AgentTeam) - 多 agent 协作框架
+- [Agent-Superthinking](https://github.com/YintaTriss/Agent-Superthinking) - 超级思考能力（专家视角分析）
+- [AgentSymphony](https://github.com/YintaTriss/AgentSymphony) - 本仓库
 
 ---
 
 ## 版本历史
 
-### v1.1.1 (2026-05-18)
-- 修复：executing 状态无法完成（done 始终 False）
-- 修复：skill_results 回调后正确转换到 completed 状态
-- 依赖：`pip install anthropic`（LLM 调用必须）
+### v0.8 (2026-05-18)
+- thinking 接入真实 LLM（MiniMax）
+- thinking 在 planning 阶段用 LLM 生成执行计划
+- thinking 申请 team skill 执行（plan 包含 team.execute_task）
+- team skill 还原为 pure bridge，调用 AgentTeam
+- memory 已有 LLM 增强分析
+- 完整流程：clarifying → planning → executing → completed
 
-### v1.1.0 (2026-05-17)
-- 完整状态机：clarifying → planning → executing → completed
-- thinking 技能真实调用 LLM（MiniMax 等）
-- LLMRouter 集成：从 87 个专家中智能选择
-- OpenClaw 技能入口（SKILL.md）
-- 交响乐完整流程测试通过
+### v0.7 (2026-05-17)
+- 交响乐状态机完善
+- done 状态正确转换
+- 初始版本
 
 ---
 
-_技能交响乐 · Agent Symphony_
+_楚灵 ⚔️ 2026-05-18_
