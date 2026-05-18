@@ -676,68 +676,66 @@ class ThinkingSkill:
 
     def _clarify_requirement(self, message: str) -> dict:
         """
-        澄清需求阶段
-        """
-        # 使用 Jury 进行 AI 分析
-        jury_result = self._analyze_with_jury(message)
-        clarity = jury_result.get("clarity_score", 0)
-        can_proceed = jury_result.get("can_proceed", False)
-        
-        # 存储需求到记忆
-        self._store_requirement(message)
-        
-        if can_proceed:
-            # 需求足够清晰，进入计划阶段
-            self._context.set("symphony_phase", "planning")
-            self._context.set("clarity_score", clarity)
-            
-            # 生成计划（带上专家分析结果）
-            return self._generate_plan(jury_result)
-        else:
-            # 需要澄清，返回 Jury 生成的响应或默认问题
-            needs = jury_result.get("needs", [])
-            response = jury_result.get("response")
-            
-            if not response:
-                response = "* 让我确认一下：\n\n"
-                for need in needs:
-                    response += f"- {need}\n"
-            
-            return {
-                "response": response,
-                "questions": [{"question": q} for q in needs],
-                "state": "clarifying",
-                "done": False,
-                "skill_requests": []
-            }
-        clarity = result.get("clarity_score", 0)
-        can_proceed = result.get("can_proceed", False)
-        
-        # 存储需求到记忆
-        self._store_requirement(message)
-        
-        if can_proceed:
-            # 需求足够清晰，进入计划阶段
-            self._context.set("symphony_phase", "planning")
-            self._context.set("clarity_score", clarity)
-            
-            # 生成计划
-            return self._generate_plan()
-        else:
-            # 需要澄清，生成问题
-            questions = result.get("questions", [])
-            if not questions:
-                # fallback: 使用简单问题
-                questions = self._generate_default_questions(message)
-            
-            return {
-                "response": self._format_questions_for_user(questions),
-                "questions": questions,
-                "state": "clarifying",
-                "done": False,
-                "skill_requests": []
-            }
+        澄清需求阶段 - 轻量对话模式
 
+        thinking 直接跟用户聊，不调 Jury（ Jury 太慢）
+        只有用户确认执行后才进入 planning 阶段
+        """
+        requirement = message.strip()
+        old_req = self._context.get("requirement", "")
+
+        # 合并需求（保留之前说的）
+        if old_req and old_req != requirement:
+            requirement = f"{old_req}；另外{requirement}"
+
+        self._context.set("requirement", requirement)
+
+        # 记录澄清轮次，超过2轮直接进 planning
+        clarify_round = self._context.get("clarify_round", 0) + 1
+        self._context.set("clarify_round", clarify_round)
+
+        # 用轻量 LLM 直接判断：需求清晰吗？需要澄清什么？
+        prompt = f"""用户需求：{requirement}
+
+判断这个需求是否足够清晰可以执行。如果不确定，优先进入执行计划而不是继续追问。
+
+返回格式：
+- 如果足够清晰或不确定：READY
+- 如果确实需要澄清（缺关键信息如API、预算、截止日期等）：QUESTION: [1个最关键的问题]
+
+只返回一行。"""
+
+        try:
+            response = self._context.call_llm(prompt)
+            response = response.strip()
+
+            if not response.startswith("QUESTION:") or clarify_round > 2:
+                # 需求清晰（或问太多轮了），进入 planning
+                self._context.set("symphony_phase", "planning")
+                return {
+                    "response": f"* 明白了。需求是：{requirement}\n\n可以开始执行了吗？",
+                    "state": "planning",
+                    "done": False,
+                    "skill_requests": []
+                }
+            else:
+                # 需要澄清，问用户
+                question = response.replace("QUESTION:", "").strip()
+                return {
+                    "response": f"* 让我确认一下：{question}",
+                    "state": "clarifying",
+                    "done": False,
+                    "skill_requests": []
+                }
+        except Exception as e:
+            # LLM 失败，fallback：进入 planning
+            self._context.set("symphony_phase", "planning")
+            return {
+                "response": f"* 收到：{requirement}\n\n可以开始执行了吗？",
+                "state": "planning",
+                "done": False,
+                "skill_requests": []
+            }
     def _format_questions_for_user(self, questions: list) -> str:
         """
         格式化问题，面向用户输出
