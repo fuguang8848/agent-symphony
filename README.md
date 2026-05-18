@@ -10,7 +10,7 @@
 
 **交响乐是一个多技能协作工作流，不是独立程序。**
 
-安装后，AI 助手（楚灵）自动理解自己的角色：担任指挥者，协调 thinking/memory/search/AgentTeam 技能完成复杂任务。
+安装后，AI 助手自动理解自己的角色：担任指挥者，协调 thinking/memory/search/AgentTeam 技能完成复杂任务。
 
 用户不需要理解交响乐是什么——只需要说需求，AI 就会启动工作流。
 
@@ -21,7 +21,7 @@
 ```
 用户描述需求
     ↓
-thinking 技能 ← AI助手（楚灵）主导：提问、澄清、分析
+thinking 技能 ← AI助手（指挥者）主导：提问、澄清、分析
     ↓
 memory 技能 ← 需求/计划明确后存入记忆
     ↓
@@ -58,7 +58,7 @@ AgentTeam ← AI助手调用 team 技能执行
 
 ---
 
-## AI 助手（楚灵）的角色
+## AI 助手的角色
 
 **我就是指挥者。** 没有额外的"指挥家"角色。
 
@@ -161,7 +161,7 @@ OpenClaw 消息处理器
     ↓
 Skill Matching（检测到交响乐需求）
     ↓
-SymphonySession（AI助手楚灵在内部协调）
+SymphonySession（AI助手指挥者在内部协调）
     ↓
 thinking / memory / search / AgentTeam 技能
     ↓
@@ -181,7 +181,7 @@ thinking / memory / search / AgentTeam 技能
 ## 版本历史
 
 ### v2.0 (2026-05-18)
-- **我就是指挥者**：删除伪需求"指挥家"角色，AI助手（楚灵）直接担任指挥
+- **我就是指挥者**：删除伪需求"指挥家"角色，AI助手直接担任指挥
 - 更新工作流描述：thinking探讨 → memory存储 → planning制定计划 → memory存储 → AgentTeam执行
 - 双重触发机制：被动（用户说启动）+ 主动（LLM判断任务性质）
 - 跨平台兼容：Windows/macOS/Linux
@@ -197,4 +197,4 @@ thinking / memory / search / AgentTeam 技能
 
 ---
 
-_楚灵 ⚔️ 2026-05-18 v2.0_
+_v2.0.0_
