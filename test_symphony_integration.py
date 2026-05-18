@@ -1,5 +1,5 @@
 """
-Test full symphony dialog - multi-turn
+Test symphony in webchat style - 模拟用户在 webchat 说"启动交响乐"
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -8,15 +8,19 @@ from agent_symphony_openclaw import SymphonySession
 
 session = SymphonySession()
 
-# Turn 1: User starts with requirement
-print("=== Turn 1 ===")
-result1 = session.handle("我想做量化交易")
-print(f"State: {result1['state']}")
-print(f"Response: {result1['response']}")
+print("=== 用户: 启动交响乐 ===")
+result = session.handle("启动交响乐")
+print(f"State: {result['state']}")
+print(f"Response:\n{result['response']}")
 print()
 
-# Turn 2: User responds to clarifying question
-print("=== Turn 2 ===")
-result2 = session.handle("没任何基础，新手")
-print(f"State: {result2['state']}")
-print(f"Response: {result2['response']}")
+print("=== 用户: 我想做量化交易 ===")
+result = session.handle("我想做量化交易")
+print(f"State: {result['state']}")
+print(f"Response:\n{result['response']}")
+print()
+
+print("=== 用户: 完全没有基础，新手一个 ===")
+result = session.handle("完全没有基础，新手一个")
+print(f"State: {result['state']}")
+print(f"Response:\n{result['response']}")

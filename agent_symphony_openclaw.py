@@ -276,13 +276,23 @@ class SymphonySession:
     def _check_symphony_intent(self, message: str) -> bool:
         """
         当消息中提到"交响乐"时，LLM 判断用户是否真的想启动工作流
+
+        快速路径：包含明确启动意图的关键词时，直接返回 True
         """
-        prompt = f"User said: {message}\nDoes the user want to START the symphony workflow (not just mention it)? Answer only 'yes' or 'no'."
+        # 快速路径：包含明确启动意图的词
+        intent_phrases = ["启动", "用交响乐", "用symphony", "帮我在", "请用", "我要用", "我想用交响乐", "交响乐帮我", "交响乐协助"]
+        for phrase in intent_phrases:
+            if phrase in message:
+                return True
+
+        # LLM 判断（处理更微妙的意图）
+        prompt = f"""User said: {message}
+Does the user want to START the symphony workflow (e.g. '启动交响乐', '交响乐帮我做XXX', '用交响乐规划')? Answer only yes or no."""
 
         try:
-            response = self.context.llm.complete(prompt, None, max_tokens=32)
+            response = self.context.llm.complete(prompt, None, max_tokens=128)
             response = response.strip().lower()
-            return 'yes' in response and 'no' not in response[:5]
+            return 'yes' in response and len(response) < 10
         except Exception:
             return False
 
