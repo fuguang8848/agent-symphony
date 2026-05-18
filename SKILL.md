@@ -1,6 +1,6 @@
 ---
 name: agent-symphony-integration
-version: 1.2.0
+version: 2.0.0
 family: compound-engineering
 description: "AgentSymphony 交响乐技能。提供多轮对话式任务编排，自动协调 thinking/memory/search/team 技能。适用于复杂任务的需求澄清、多技能协作和规划执行。"
 argument-hint: "[需求描述]"
@@ -47,19 +47,31 @@ triggers:
 
 ## 概述
 
-AgentSymphony（技能交响乐）是一个多技能协作框架，通过「指挥家 + 技能」模式完成复杂任务。
+交响乐是一个**多技能协作工作流**，不是独立程序。AI 助手（楚灵）就是这个工作流的**指挥者**，没有额外的"指挥家"角色。
 
-**架构：**
+**工作流：**
 ```
-用户消息 → OpenClaw（检测到交响乐需求）→ SymphonySession（指挥家）
-                                                ↓
-                        thinking 技能 → LLM（分析、规划）
-                        memory 技能  → LLM（记忆检索）
-                        search 技能  → LLM（搜索、总结）
-                        team 技能    → LLM（任务拆分）
+用户描述需求
+    ↓
+thinking 技能 ← AI助手（楚灵）主导：提问、澄清、分析
+    ↓
+memory 技能 ← 需求/计划明确后存入记忆
+    ↓
+planning（计划阶段）← AI助手制定执行计划
+    ↓
+memory 技能 ← 计划存入记忆
+    ↓
+AgentTeam ← AI助手调用 team 技能执行
 ```
 
-**LLM 接入：** 交响乐本身不携带 LLM，智力来自 OpenClaw 运行时注入的 LLM 配置。技能通过 OpenClaw 上下文调用 LLM，无需额外配置。
+**自然调用：** 过程中需要搜索时，AI助手自然调用 search 技能；需要记忆时调用 memory 技能。不需要手动管理。
+
+**AI 助手（楚灵）的职责：**
+- 判断何时启动交响乐
+- 通过 thinking 技能与用户对话澄清需求
+- 协调所有技能的调用时机
+- 整合结果，回应用户
+- 调用 AgentTeam 执行计划
 
 ## 触发方式
 
@@ -129,4 +141,4 @@ for req in result.get("skill_requests", []):
 
 ---
 
-_AgentSymphony OpenClaw Integration v1.1.0_
+_AgentSymphony OpenClaw Integration v2.0.0_

@@ -222,6 +222,20 @@ class SymphonySession:
             # 重置会话
             self.reset()
 
+        # 如果消息中提到"交响乐"，先 LLM 判断用户是否想启动工作流
+        if message and "交响乐" in message:
+            intent = self._check_symphony_intent(message)
+            if not intent:
+                # 用户只是提到交响乐，不是想启动，正常回应
+                return {
+                    "response": f"交响乐是一个多技能协作工作流，如果你有复杂任务需要分析和规划，可以告诉我你的需求。",
+                    "skill_requests": [],
+                    "state": "completed",
+                    "done": True,
+                    "questions": [],
+                    "success": True
+                }
+
         # 检查是否需要主动检索记忆
         if message and not answers:
             # 从消息中提取可能的检索词
@@ -258,6 +272,19 @@ class SymphonySession:
             # 返回消息前 50 字符作为检索词
             return message[:50]
         return ""
+
+    def _check_symphony_intent(self, message: str) -> bool:
+        """
+        当消息中提到"交响乐"时，LLM 判断用户是否真的想启动工作流
+        """
+        prompt = f"User said: {message}\nDoes the user want to START the symphony workflow (not just mention it)? Answer only 'yes' or 'no'."
+
+        try:
+            response = self.context.llm.complete(prompt, None, max_tokens=32)
+            response = response.strip().lower()
+            return 'yes' in response and 'no' not in response[:5]
+        except Exception:
+            return False
 
     def execute_skill(self, skill: str, action: str, params: dict) -> dict:
         """

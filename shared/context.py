@@ -169,11 +169,16 @@ class LLMProvider:
                 self._anthropic_client = Anthropic(api_key=self.api_key, base_url=self.base_url)
             
             try:
+                extra_kwargs = {}
+                if kwargs.get("disable_thinking"):
+                    extra_kwargs["thinking"] = {"type": "disabled"}
+                
                 response = self._anthropic_client.messages.create(
                     model=self.model,
                     max_tokens=kwargs.get("max_tokens", 1024),
                     system=system,
-                    messages=[{"role": "user", "content": prompt}]
+                    messages=[{"role": "user", "content": prompt}],
+                    **extra_kwargs
                 )
                 # 支持多种 content block 类型
                 if response.content:
