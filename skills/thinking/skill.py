@@ -11,7 +11,11 @@ Agent Symphony 技能交响乐的核心协调者
 
 import time
 import sys
+import json
+import os
 import logging
+import subprocess
+import threading
 from typing import Any, Optional
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -676,41 +680,201 @@ class ThinkingSkill:
 
     def _clarify_requirement(self, message: str) -> dict:
         """
-        澄清需求阶段 - 轻量对话模式
+        澄清需求阶段 - Jury 通过 OpenClaw 子代理执行
 
-        thinking 直接跟用户聊，不调 Jury（ Jury 太慢）
-        只有用户确认执行后才进入 planning 阶段
+        流程：
+        1. 用户说需求 -> thinking 立即问一个跟进问题，同时 spawn 子代理跑 Jury
+        2. 用户回答时 -> thinking 检查 Jury 结果，有结果则用 Jury 分析
+        3. Jury 完成前 -> thinking 继续对话，不阻塞
         """
         requirement = message.strip()
         old_req = self._context.get("requirement", "")
 
-        # 合并需求（保留之前说的）
+        # 合并需求
         if old_req and old_req != requirement:
             requirement = f"{old_req}；另外{requirement}"
 
         self._context.set("requirement", requirement)
+        self._context.set("clarify_round", self._context.get("clarify_round", 0) + 1)
 
-        # 记录澄清轮次，超过2轮直接进 planning
-        clarify_round = self._context.get("clarify_round", 0) + 1
-        self._context.set("clarify_round", clarify_round)
+        # 检查 Jury 结果文件
+        jury_result = self._check_jury_result()
 
-        # 用轻量 LLM 直接判断：需求清晰吗？需要澄清什么？
+        if jury_result:
+            # Jury 分析完成，使用结果
+            return self._use_jury_result(jury_result, requirement)
+
+        # Jury 还没结果（或还没启动）
+        # 检查是否需要启动 Jury
+        jury_status = self._context.get("jury_pending")
+        if not jury_status:
+            # 第一次说需求，启动 Jury 子代理
+            self._spawn_jury_agent(requirement)
+            quick_question = self._generate_quick_question(requirement)
+            return {
+                "response": f"* {quick_question}",
+                "state": "clarifying",
+                "done": False,
+                "skill_requests": [],
+                "jury_status": "running"
+            }
+        elif jury_status == "done":
+            # Jury 已完成但没结果（异常），fallback 到轻量判断
+            return self._lightweight_clarify(requirement)
+        else:
+            # Jury 还在跑，继续对话
+            quick_question = self._generate_quick_question(requirement)
+            return {
+                "response": f"* {quick_question}（专家分析中...）",
+                "state": "clarifying",
+                "done": False,
+                "skill_requests": [],
+                "jury_status": "running"
+            }
+
+    # ==================== Jury 子代理支持 ====================
+
+    def _get_jury_result_path(self) -> str:
+        """获取 Jury 结果文件路径"""
+        data_dir = os.path.expanduser("~/.openclaw/symphony")
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "jury_result.json")
+
+    def _spawn_jury_agent(self, requirement: str):
+        """
+        Spawn 子代理跑 Jury 分析
+
+        子代理是独立进程，不会被主进程超时杀掉
+        结果写入 JSON 文件，thinking 下一轮读取
+        """
+        result_file = self._get_jury_result_path()
+
+        # 如果结果文件已存在，删除（旧结果）
+        if os.path.exists(result_file):
+            try:
+                os.remove(result_file)
+            except Exception:
+                pass
+
+        self._context.set("jury_pending", "running")
+        self._context.set("jury_requirement", requirement)
+
+        # 构造脚本路径
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(os.path.dirname(script_dir), "run_jury_analysis.py")
+
+        # 使用 python（OpenClaw 的 Python）执行
+        python_exe = sys.executable
+
+        cmd = [
+            python_exe,
+            script_path,
+            requirement,
+            result_file
+        ]
+
+        try:
+            # 后台启动，不等待
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            logging.info(f"[Thinking] Jury agent spawned, pid={proc.pid}")
+        except Exception as e:
+            logging.warning(f"[Thinking] Failed to spawn jury agent: {e}")
+            self._context.set("jury_pending", "error")
+
+    def _check_jury_result(self) -> dict | None:
+        """
+        检查 Jury 结果文件
+
+        Returns:
+            Jury 结果 dict 或 None（还没完成）
+        """
+        jury_status = self._context.get("jury_pending")
+        if not jury_status:
+            return None
+
+        result_file = self._get_jury_result_path()
+
+        if not os.path.exists(result_file):
+            return None  # 还在运行
+
+        try:
+            with open(result_file, 'r', encoding='utf-8') as f:
+                result = json.load(f)
+            self._context.set("jury_pending", "done")
+            return result
+        except Exception as e:
+            logging.warning(f"[Thinking] Failed to read jury result: {e}")
+            self._context.set("jury_pending", "error")
+            return None
+
+    def _use_jury_result(self, jury_result: dict, requirement: str) -> dict:
+        """
+        使用 Jury 分析结果决定后续动作
+        """
+        can_proceed = jury_result.get("can_proceed", False)
+        clarity = jury_result.get("clarity_score", 0)
+        response = jury_result.get("response")
+        needs = jury_result.get("needs", [])
+        clarify_round = self._context.get("clarify_round", 0)
+
+        # 清理 jury 状态
+        self._context.set("jury_pending", None)
+        self._context.set("jury_result", jury_result)
+        self._context.set("clarity_score", clarity)
+
+        if can_proceed or clarify_round > 2:
+            # 需求清晰，进入 planning
+            self._context.set("symphony_phase", "planning")
+            plan_intro = ""
+            if response:
+                plan_intro = response[:200] + "\n\n"
+            return {
+                "response": f"{plan_intro}* 明白了。需求是：{requirement}\n\n可以开始执行了吗？",
+                "state": "planning",
+                "done": False,
+                "skill_requests": []
+            }
+        else:
+            # 需要澄清
+            if response:
+                return {
+                    "response": response[:300],
+                    "state": "clarifying",
+                    "done": False,
+                    "skill_requests": []
+                }
+            else:
+                question = needs[0] if needs else "请再详细说说你的需求？"
+                return {
+                    "response": f"* 让我确认一下：{question}",
+                    "state": "clarifying",
+                    "done": False,
+                    "skill_requests": []
+                }
+
+    def _lightweight_clarify(self, requirement: str) -> dict:
+        """
+        Fallback：轻量级澄清（不用 Jury）
+        """
         prompt = f"""用户需求：{requirement}
 
-判断这个需求是否足够清晰可以执行。如果不确定，优先进入执行计划而不是继续追问。
+判断是否足够清晰可以执行。如果不确定，优先进入执行计划。
 
 返回格式：
-- 如果足够清晰或不确定：READY
-- 如果确实需要澄清（缺关键信息如API、预算、截止日期等）：QUESTION: [1个最关键的问题]
+- 如果足够清晰：READY
+- 如果需要澄清：QUESTION: [1个最关键的问题]
 
 只返回一行。"""
 
         try:
-            response = self._context.call_llm(prompt)
-            response = response.strip()
+            response = self._context.call_llm(prompt).strip()
 
-            if not response.startswith("QUESTION:") or clarify_round > 2:
-                # 需求清晰（或问太多轮了），进入 planning
+            if not response.startswith("QUESTION:"):
                 self._context.set("symphony_phase", "planning")
                 return {
                     "response": f"* 明白了。需求是：{requirement}\n\n可以开始执行了吗？",
@@ -719,7 +883,6 @@ class ThinkingSkill:
                     "skill_requests": []
                 }
             else:
-                # 需要澄清，问用户
                 question = response.replace("QUESTION:", "").strip()
                 return {
                     "response": f"* 让我确认一下：{question}",
@@ -727,8 +890,7 @@ class ThinkingSkill:
                     "done": False,
                     "skill_requests": []
                 }
-        except Exception as e:
-            # LLM 失败，fallback：进入 planning
+        except Exception:
             self._context.set("symphony_phase", "planning")
             return {
                 "response": f"* 收到：{requirement}\n\n可以开始执行了吗？",
@@ -736,7 +898,28 @@ class ThinkingSkill:
                 "done": False,
                 "skill_requests": []
             }
-    def _format_questions_for_user(self, questions: list) -> str:
+
+    def _generate_quick_question(self, requirement: str) -> str:
+        """
+        生成一个快速的跟进问题（1次 LLM 调用）
+        """
+        prompt = f"""用户需求：{requirement}
+
+问用户 1 个最关键的跟进问题（只需要 1 个）。
+
+格式：直接输出问题，不要前缀。
+只返回一行。"""
+
+        try:
+            response = self._context.call_llm(prompt).strip()
+            # 去掉可能的前缀
+            for prefix in ["QUESTION:", "问题：", "Q:"]:
+                if response.startswith(prefix):
+                    response = response[len(prefix):].strip()
+            return response if response else "还有别的需要补充吗？"
+        except Exception:
+            return "还有别的需要补充吗？"
+
         """
         格式化问题，面向用户输出
         """
