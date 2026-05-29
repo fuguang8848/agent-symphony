@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-symphony"
+version = "0.1.0"
+description = "交响乐技能家族 - OpenClaw 多技能协作框架"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27.0",
+    "aiofiles>=23.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["server*"]
