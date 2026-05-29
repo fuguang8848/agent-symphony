@@ -205,6 +205,31 @@ async def team_status(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class TeamWaitRequest(BaseModel):
+    session_id: str
+    timeout: int = 300
+
+
+@app.post("/team/wait")
+async def team_wait(req: TeamWaitRequest):
+    """等待任务完成"""
+    try:
+        return team_skill.wait_complete(session_id=req.session_id, timeout=req.timeout)
+    except Exception as e:
+        logger.exception("team/wait error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/team/shutdown")
+async def team_shutdown(session_id: str):
+    """通知 sub-agent 关闭"""
+    try:
+        return team_skill.shutdown(session_id=session_id)
+    except Exception as e:
+        logger.exception("team/shutdown error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Search 路由 ───────────────────────────────────────────────────────
 
 from .skills.search_skill import SearchSkill
