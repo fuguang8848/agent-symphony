@@ -317,8 +317,8 @@ class SearchState:
 
 # ==================== 技能注册 ====================
 
-class SkillRegistry:
-    """技能注册表 - 用于技能间调用"""
+class LocalSkillRegistry:
+    """技能注册表 - 用于技能间调用（本地/轻量级）"""
     
     def __init__(self):
         self._skills: dict[str, Any] = {}
@@ -375,7 +375,7 @@ class SharedContext:
         self.llm: LLMProvider = LLMProvider()
         
         # 技能注册表
-        self.skills: SkillRegistry = SkillRegistry()
+        self.skills: LocalSkillRegistry = LocalSkillRegistry()
         
         # 当前调用者信息
         self._current_caller: CallerInfo = CallerInfo()

@@ -17,10 +17,15 @@ from pathlib import Path
 from typing import Any
 from dataclasses import dataclass
 
-# 将 AgentTeam 添加到 path（如果不在 Python 环境里）
-_agentteam_path = Path(__file__).parent.parent.parent.parent / "AgentTeam"
-if str(_agentteam_path) not in sys.path:
-    sys.path.insert(0, str(_agentteam_path))
+# 尝试直接导入 agentteam（已安装到 site-packages）
+# 如果失败，回退到本地开发路径
+try:
+    from agentteam.core import CTTeam, AgentState
+except ImportError:
+    _agentteam_path = Path(__file__).parent.parent.parent.parent / "AgentTeam"
+    if str(_agentteam_path) not in sys.path:
+        sys.path.insert(0, str(_agentteam_path))
+    from agentteam.core import CTTeam, AgentState
 
 from shared import (
     Skill,

@@ -30,25 +30,32 @@ from shared import (
 )
 
 # === Agent-Superthinking 集成 ===
-# 添加 Agent-Superthinking 到 Python 路径
-SUPER_THINKING_PATH = Path(__file__).parent.parent.parent.parent / "Agent-superthinking" / "src"
-if str(SUPER_THINKING_PATH) not in sys.path:
-    sys.path.insert(0, str(SUPER_THINKING_PATH))
-
+# 尝试直接导入 super_thinking（已安装到 site-packages）
+# 如果失败，回退到本地开发路径
 try:
     from super_thinking.core.extended_registry import ExtendedRegistry as SuperRegistry
     from super_thinking.core.jury import Jury, JuryResult
     from super_thinking.core.llm_router import LLMRouter
     from super_thinking.perspectives._interface import PerspectiveOutput
     SUPERTHINKING_AVAILABLE = True
-except ImportError as e:
-    logging.warning(f"Agent-Superthinking 未安装: {e}")
-    SUPERTHINKING_AVAILABLE = False
-    SuperRegistry = None
-    Jury = None
-    JuryResult = None
-    LLMRouter = None
-    PerspectiveOutput = None
+except ImportError:
+    SUPER_THINKING_PATH = Path(__file__).parent.parent.parent.parent / "Agent-superthinking" / "src"
+    if str(SUPER_THINKING_PATH) not in sys.path:
+        sys.path.insert(0, str(SUPER_THINKING_PATH))
+    try:
+        from super_thinking.core.extended_registry import ExtendedRegistry as SuperRegistry
+        from super_thinking.core.jury import Jury, JuryResult
+        from super_thinking.core.llm_router import LLMRouter
+        from super_thinking.perspectives._interface import PerspectiveOutput
+        SUPERTHINKING_AVAILABLE = True
+    except ImportError as e:
+        logging.warning(f"Agent-Superthinking 未安装: {e}")
+        SUPERTHINKING_AVAILABLE = False
+        SuperRegistry = None
+        Jury = None
+        JuryResult = None
+        LLMRouter = None
+        PerspectiveOutput = None
 
 
 # === 预定义的专家视角配置 ===
