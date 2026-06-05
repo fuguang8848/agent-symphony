@@ -34,11 +34,11 @@ if "agentteam" not in sys.modules:
     sys.modules["agentteam.team"] = MagicMock()
 
 # 导入前先重置全局上下文（避免测试间污染）
-from agent_symphony.shared import reset_context, new_context
-from agent_symphony.skills.thinking import ThinkingSkill
-from agent_symphony.skills.memory import MemorySkill, MemoryConfig
-from agent_symphony.skills.search import SearchSkill, SearchConfig
-from agent_symphony.skills.team import TeamSkill, TeamSkillConfig
+from shared.shared import reset_context, new_context
+from skills.thinking import ThinkingSkill
+from skills.memory import MemorySkill, MemoryConfig
+from skills.search import SearchSkill, SearchConfig
+from skills.team import TeamSkill, TeamSkillConfig
 
 
 def mock_embedding(texts):
@@ -70,7 +70,7 @@ class TestSymphonyIntegration(unittest.TestCase):
 
         # Mock LLM embeddings 以避免真实 API 调用
         cls._embedding_patcher = patch(
-            'agent_symphony.shared.context.LLMProvider.embed',
+            'shared.context.LLMProvider.embed',
             side_effect=mock_embedding
         )
         cls._embedding_patcher.start()
@@ -352,7 +352,7 @@ class TestSymphonyIntegration(unittest.TestCase):
         """
         print("\n--- 场景5: 插入式 LLM Provider ---")
 
-        from agent_symphony.shared.context import LLMProvider
+        from shared.shared.context import LLMProvider
 
         # 创建 LLM Provider
         llm = LLMProvider()
@@ -383,7 +383,7 @@ class TestSymphonyIntegration(unittest.TestCase):
         """
         print("\n--- 场景5b: LLM embed 功能（mock）---")
 
-        from agent_symphony.shared.context import LLMProvider
+        from shared.shared.context import LLMProvider
 
         llm = LLMProvider()
 
@@ -421,7 +421,7 @@ class TestSymphonyIntegration(unittest.TestCase):
         """
         print("\n--- 场景6: 向量存储 ---")
 
-        from agent_symphony.skills.memory.skill import VectorStore
+        from skills.memory.skill import VectorStore
 
         # 创建向量存储
         vector_store = VectorStore(dim=128)
