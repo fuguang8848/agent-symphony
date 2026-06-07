@@ -18,6 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+[tool.setuptools]
+package-dir = {"__root__" = "."}
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["server*"]
