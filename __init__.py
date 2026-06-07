@@ -10,10 +10,10 @@ AgentSymphony - 技能交响乐
   python -m agent_symphony "帮我分析石榴籽项目"
 """
 
-from agent_symphony.skills.thinking import ThinkingSkill
-from agent_symphony.skills.memory import MemorySkill
-from agent_symphony.skills.search import SearchSkill
-from agent_symphony.shared import SharedContext
+from .skills.thinking import ThinkingSkill
+from .skills.memory import MemorySkill
+from .skills.search import SearchSkill
+from .shared import SharedContext
 
 __all__ = [
     "ThinkingSkill",

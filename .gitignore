@@ -8,3 +8,4 @@ venv/
 .pytest_cache/
 *.log
 .DS_Store
+*.bak-pre-*
