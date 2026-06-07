@@ -14,10 +14,11 @@ import os
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_symphony.skills.thinking import ThinkingSkill
-from agent_symphony.skills.memory import MemorySkill
-from agent_symphony.skills.search import SearchSkill
-from agent_symphony.shared import SharedContext
+# 使用相对导入（与 __init__.py 保持一致）
+from .skills.thinking import ThinkingSkill
+from .skills.memory import MemorySkill
+from .skills.search import SearchSkill
+from .shared import SharedContext
 
 
 def main():
