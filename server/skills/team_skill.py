@@ -8,6 +8,8 @@ team_skill.py - 多任务执行（基于 sessions_spawn）
   3. 直接读 session JSONL 文件，绕过 Gateway 权限问题
 """
 import json
+import os
+import shutil
 import subprocess
 import time
 import uuid
@@ -15,6 +17,12 @@ from pathlib import Path
 
 GATEWAY_URL = "ws://127.0.0.1:18789"
 POLL_INTERVAL = 5  # 秒
+
+# V 6/13 22:14 fix: 用绝对路径 (subprocess 不会自动从 shell 的 PATH 找)
+# 优先用 PATH 里的 openclaw, 找不到 fallback 到 ~/.npm-global/bin/openclaw
+_OPENCLAW_BIN = shutil.which("openclaw") or str(
+    Path.home() / ".npm-global" / "bin" / "openclaw"
+)
 
 
 def _read_session_file(session_key: str) -> dict:
@@ -44,9 +52,9 @@ def _read_session_file(session_key: str) -> dict:
 
 
 def _gateway_call(method: str, params: dict = None) -> dict:
-    """调用 Gateway RPC"""
+    """调用 Gateway RPC (V 6/13 22:14 fix: 绝对路径)"""
     cmd = [
-        "openclaw", "gateway", "call",
+        _OPENCLAW_BIN, "gateway", "call",
         method,
         "--params", json.dumps(params or {}),
         "--json",
