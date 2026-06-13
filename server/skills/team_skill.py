@@ -106,9 +106,12 @@ class TeamSkill:
                 "label": f"symphony-team-{session_id}",
             })
             session_key = resp.get("key")
-            created_id = session_key.split(":")[-1]
-            if not session_key:
-                return {"error": "No sessionKey in response", "raw": resp}
+            # V 6/13 22:55 fix: key 里的 uuid ≠ 真实 sessionId (实际文件用 sessionId/entry.sessionId)
+            # resp 结构: {"key": "agent:main:dashboard:<uuid>", "sessionId": "<real_uuid>", "entry": {"sessionId": ...}}
+            # 之前用 session_key.split(":")[-1] 拿到的是错的 uuid, 读不到 JSONL 文件
+            created_id = resp.get("sessionId") or (resp.get("entry") or {}).get("sessionId")
+            if not session_key or not created_id:
+                return {"error": "No sessionKey/sessionId in response", "raw": resp}
         except Exception as e:
             return {"error": f"Failed to create session: {e}"}
 
